@@ -24,7 +24,7 @@ app.on('browser-window-created',(_e,win)=>{
         return {files:state.files,version:state.version};
       })()`);
       await fs.mkdir(path.resolve('artifacts'),{recursive:true});
-      await fs.writeFile(path.resolve('artifacts/desktop.png'),(await win.webContents.capturePage()).toPNG());
+      await fs.writeFile(path.resolve('artifacts/desktop-smoke.png'),(await win.webContents.capturePage()).toPNG());
       console.log('UI_SMOKE_OK',JSON.stringify(result));clearTimeout(timeout);app.exit(0);
     }catch(e){console.error(e);clearTimeout(timeout);app.exit(1);}
   });

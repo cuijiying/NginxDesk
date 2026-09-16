@@ -1,4 +1,5 @@
 node_modules/
 dist/
 vendor/
+artifacts/desktop-smoke.png
 .test-runtime/

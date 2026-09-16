@@ -6,6 +6,8 @@
 
 项目代码采用 [MIT License](LICENSE)。打包的 nginx 保留其原始许可证，位于安装目录 `resources/nginx/docs/LICENSE`。
 
+Windows 安装程序可从 [GitHub Releases](https://github.com/cuijiying/NginxDesk/releases/latest) 下载。安装程序尚未签名，附带 SHA256 校验文件。
+
 ## 功能
 
 - 实例状态、版本、PID；启动、优雅停止、配置校验、重载、日志重新打开。
@@ -54,6 +56,6 @@ npm run dist
 
 `test/manager.test.cjs` 包含输入约束测试，以及真实 nginx 的启动、HTTP 响应、配置回滚、备份、重载与停止集成测试；使用隔离临时目录和动态端口。
 
-`npm run test:ui` 在临时用户配置下启动真实 Electron 窗口，验证 preload、IPC、配置读取、导航和站点生成，并保存 `artifacts/desktop.png`。
+`npm run test:ui` 在临时用户配置下启动真实 Electron 窗口，验证 preload、IPC、配置读取、导航和站点生成，并保存本地测试截图 `artifacts/desktop-smoke.png`。
 
 nginx 官方发行包的许可保存在安装目录 `resources/nginx/docs/LICENSE` 中。
