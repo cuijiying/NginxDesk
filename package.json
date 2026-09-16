@@ -1,0 +1,26 @@
+{
+  "name": "nginx-desk",
+  "version": "1.0.0",
+  "description": "Windows nginx management desktop",
+  "author": "Jiying Cui",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "prepare:nginx": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-nginx.ps1",
+    "test": "node --test test/*.test.cjs",
+    "test:ui": "electron scripts/ui-smoke.cjs",
+    "dist": "npm run prepare:nginx && electron-builder --win nsis --x64"
+  },
+  "devDependencies": { "electron": "44.4.1", "electron-builder": "26.8.1" },
+  "build": {
+    "appId": "com.nginxdesk.desktop",
+    "productName": "Nginx Desk",
+    "files": ["src/**/*", "package.json"],
+    "extraResources": [{"from": "vendor/nginx", "to": "nginx"}],
+    "win": {"target": "nsis", "signAndEditExecutable": false},
+    "nsis": {"oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "deleteAppDataOnUninstall": false},
+    "directories": {"output": "dist"}
+  }
+}
