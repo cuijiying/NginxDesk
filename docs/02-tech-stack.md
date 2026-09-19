@@ -58,7 +58,7 @@ Electron 同时开了两个世界：
 | 导航 | `will-navigate` 全部拦截 | 页面不能跳到外站 |
 | 弹窗 | `setWindowOpenHandler` deny | 不能 `window.open` |
 
-因此：**所有危险操作必须走 IPC**。preload 里写死了 12 个方法名，主进程再校验「请求来自本机 `index.html`」。
+因此：**所有危险操作必须走 IPC**。preload 里写死方法名，主进程再校验「请求来自本机 `index.html`」。
 
 ## 2.4 没有选用的技术（以及原因）
 

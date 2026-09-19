@@ -215,6 +215,9 @@ select,input{
   padding:10px 12px;color:var(--text);background:rgba(0,0,0,.32);
   border:1px solid var(--line);font:inherit;font-size:13px;outline:none;
 }
+select{position:relative;z-index:2;max-width:100%}
+body.is-busy{cursor:wait}
+body.is-busy select,body.is-busy input,body.is-busy textarea{pointer-events:none;cursor:wait}
 select:focus,input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--tint)}
 input[type=checkbox]{accent-color:var(--accent)}
 .check{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
@@ -240,7 +243,7 @@ button:focus-visible,.theme-dot:focus-visible{outline:2px solid var(--accent);ou
 ::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--accent) 32%,#1b2430);border:1px solid var(--line)}
 ::-webkit-scrollbar-track{background:rgba(0,0,0,.25)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
-@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){
   *,.metric,.page.active{animation:none!important;transition:none!important}
 }

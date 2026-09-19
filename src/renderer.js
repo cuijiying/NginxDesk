@@ -17,7 +17,18 @@ applyTheme(localStorage.getItem('nd-theme')||'cyan');
 document.querySelectorAll('.theme-dot').forEach(b=>b.onclick=()=>applyTheme(b.dataset.theme));
 function output(text,error=false){$('output').textContent=(error?'操作失败：\n':'')+text;$('output').classList.toggle('is-error',error);$('operation-time').textContent=new Date().toLocaleTimeString();}
 function controls(){return [...document.querySelectorAll('button')].filter(el=>!el.classList.contains('theme-dot'));}
-async function task(fn){if(busy)return;busy=true;controls().forEach(el=>el.disabled=true);try{await fn();}catch(e){output(e.message,true);}finally{busy=false;controls().forEach(el=>el.disabled=false);}}
+function lock(on){
+  document.body.classList.toggle('is-busy',on);
+  controls().forEach(el=>{el.disabled=on;});
+}
+async function task(fn){
+  if(busy){output('请等待当前操作完成后再试。',true);return;}
+  busy=true;lock(true);
+  try{return await fn();}
+  catch(e){output(e.message,true);}
+  finally{busy=false;lock(false);}
+}
+function ask(message,detail=''){return window.desk.confirm({message,detail});}
 function markDirty(value){dirty=value;$('dirty').textContent=value?'有未保存的修改':'已保存';$('dirty').classList.toggle('warn',value);}
 async function state(){
   const s=await window.desk.state();
@@ -32,15 +43,27 @@ async function state(){
   $('root').textContent=s.root;
   const names=[...s.files];if(currentFile&&!names.includes(currentFile))names.push(currentFile);
   const signature=names.join('\n');
-  if(signature!==$('files').dataset.list){
-    $('files').dataset.list=signature;
-    $('files').replaceChildren(...names.map(name=>{const o=document.createElement('option');o.value=name;o.textContent=name;return o;}));
+  const files=$('files');
+  if(signature!==files.dataset.list){
+    files.dataset.list=signature;
+    files.replaceChildren(...names.map(name=>{const o=document.createElement('option');o.value=name;o.textContent=name;return o;}));
   }
-  if(currentFile)$('files').value=currentFile;
+  if(currentFile)files.value=currentFile;
   return s;
 }
-async function loadFile(name){if(dirty&&!confirm('放弃当前未保存的修改？'))return false;$('editor').value=await window.desk.read(name);currentFile=name;$('files').value=name;markDirty(false);return true;}
-async function show(page){activePage=page;document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===page));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('page-title').textContent=titles[page];if(page==='logs')await logs();if(page==='backups')await backups();if(page==='engines')await versions();}
+async function loadFile(name){
+  if(dirty&&!await ask('放弃当前未保存的修改？'))return false;
+  $('editor').value=await window.desk.read(name);currentFile=name;$('files').value=name;markDirty(false);return true;
+}
+async function show(page){
+  activePage=page;
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===page));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+  $('page-title').textContent=titles[page];
+  if(page==='logs')await logs();
+  if(page==='backups')await backups();
+  if(page==='engines')await versions();
+}
 async function logs(){$('log-content').textContent=await window.desk.logs($('log-type').value);}
 async function versions(refresh=false){
   const data=await window.desk.versions(!!refresh);
@@ -50,7 +73,7 @@ async function versions(refresh=false){
   const box=$('version-list');
   box.replaceChildren();
   if(data.error){const p=document.createElement('p');p.className='muted';p.textContent='无法获取官方列表：'+data.error+'。仍可启用已下载的版本。';box.append(p);}
-  if(!data.available.length){const p=document.createElement('p');p.className='muted';p.textContent='暂无可用版本。';box.append(p);return data;}
+  if(!data.available.length){const p=document.createElement('p');p.className='muted';p.textContent='暂无可用版本。';box.append(p);if(busy)lock(true);return data;}
   for(const item of data.available){
     const row=document.createElement('div');row.className='backup-row';
     const label=document.createElement('span');
@@ -68,37 +91,61 @@ async function versions(refresh=false){
     else {b.textContent='安装并启用';b.className='primary';}
     b.onclick=()=>task(async()=>{
       if(item.version===data.current){output(`当前已是 nginx ${item.version}`);return;}
-      if(!confirm(`将启用 nginx ${item.version}。请确认服务已停止；现有配置会保留。`))return;
+      if(!await ask(`将启用 nginx ${item.version}`, '请确认服务已停止；现有配置会保留。'))return;
       output('正在安装所选版本，请稍候…');
-      output(await window.desk.installVersion(item.version));
+      const msg=await window.desk.installVersion(item.version);
       await state();
-      await versions();
-    });
+      output(msg);
+      return 'refresh-engines';
+    }).then(flag=>{if(flag==='refresh-engines'&&activePage==='engines')return versions();});
     actions.append(b);
     if(data.installed.includes(item.version)&&item.version!==data.current){
       const del=document.createElement('button');del.textContent='删除';del.className='danger';
       del.onclick=()=>task(async()=>{
-        if(!confirm(`将删除本地下载的 nginx ${item.version}。当前正在使用的引擎不受影响。`))return;
+        if(!await ask(`将删除本地下载的 nginx ${item.version}`, '当前正在使用的引擎不受影响。'))return;
         output(await window.desk.deleteVersion(item.version));
-        await versions();
-      });
+        return 'refresh-engines';
+      }).then(flag=>{if(flag==='refresh-engines'&&activePage==='engines')return versions();});
       actions.append(del);
     }
     row.append(label,actions);box.append(row);
   }
+  if(busy)lock(true);
   return data;
 }
-async function backups(){const names=await window.desk.backups();$('backup-list').replaceChildren();if(!names.length)$('backup-list').textContent='尚无备份，保存配置后会自动生成。';for(const name of names){const row=document.createElement('div');row.className='backup-row';const label=document.createElement('span');label.textContent=name;const b=document.createElement('button');b.textContent='载入编辑器';b.onclick=()=>task(async()=>{if(dirty&&!confirm('放弃当前未保存的修改？'))return;const data=await window.desk.backup(name);currentFile=data.file;$('editor').value=data.content;markDirty(true);await state();await show('config');output('备份已载入，请校验并保存后重载。');});row.append(label,b);$('backup-list').append(row);}}
+async function backups(){
+  const names=await window.desk.backups();
+  $('backup-list').replaceChildren();
+  if(!names.length)$('backup-list').textContent='尚无备份，保存配置后会自动生成。';
+  for(const name of names){
+    const row=document.createElement('div');row.className='backup-row';
+    const label=document.createElement('span');label.textContent=name;
+    const b=document.createElement('button');b.textContent='载入编辑器';
+    b.onclick=()=>task(async()=>{
+      if(dirty&&!await ask('放弃当前未保存的修改？'))return;
+      const data=await window.desk.backup(name);
+      currentFile=data.file;$('editor').value=data.content;markDirty(true);
+      await state();await show('config');
+      output('备份已载入，请校验并保存后重载。');
+    });
+    row.append(label,b);$('backup-list').append(row);
+  }
+  if(busy)lock(true);
+}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>task(()=>show(b.dataset.page)));
 document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>task(async()=>{if(b.dataset.action==='reload'&&dirty)throw Error('编辑器有未保存修改，请先保存或放弃修改再重载。');output('正在执行，请稍候…');output(await window.desk.action(b.dataset.action));await state();}));
 $('folder').onclick=()=>task(async()=>{const error=await window.desk.folder();if(error)throw Error(error);});
-$('files').onchange=()=>task(async()=>{const selected=$('files').value;if(!await loadFile(selected))$('files').value=currentFile;});
+$('files').onchange=()=>task(async()=>{
+  const selected=$('files').value;
+  try{if(!await loadFile(selected))$('files').value=currentFile;}
+  catch(e){$('files').value=currentFile;throw e;}
+});
 $('editor').oninput=()=>markDirty(true);
 $('editor').onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const t=e.target;t.setRangeText('    ',t.selectionStart,t.selectionEnd,'end');markDirty(true);}};
 $('save').onclick=()=>task(async()=>{output(await window.desk.save({name:currentFile,content:$('editor').value}));markDirty(false);await state();});
 $('refresh-log').onclick=()=>task(logs);$('log-type').onchange=()=>task(logs);$('refresh-backups').onclick=()=>task(backups);$('refresh-versions').onclick=()=>task(()=>versions(true));
 $('pick-folder').onclick=()=>task(async()=>{const dir=await window.desk.directory();if(dir){$('site-form').elements.target.value=dir;$('site-form').elements.kind.value='static';}});
-$('site-form').onsubmit=e=>{e.preventDefault();task(async()=>{if(dirty&&!confirm('放弃当前未保存的修改？'))return;const data=Object.fromEntries(new FormData(e.target));if(!/^[a-zA-Z0-9_-]+$/.test(data.name))throw Error('无效文件名');const name=`sites/${data.name}.conf`;const s=await window.desk.state();if(s.files.includes(name))throw Error('文件已存在，请使用其他名称或从配置列表编辑');const content=await window.desk.generate(data);currentFile=name;$('editor').value=content;markDirty(true);await state();await show('config');output('配置已生成，点击「校验并保存」创建站点，然后重载生效。');});};
-window.addEventListener('beforeunload',e=>{if(dirty&&!confirm('有未保存的配置，确定退出？')){e.preventDefault();e.returnValue=false;}});
+$('site-form').onsubmit=e=>{e.preventDefault();task(async()=>{if(dirty&&!await ask('放弃当前未保存的修改？'))return;const data=Object.fromEntries(new FormData(e.target));if(!/^[a-zA-Z0-9_-]+$/.test(data.name))throw Error('无效文件名');const name=`sites/${data.name}.conf`;const s=await window.desk.state();if(s.files.includes(name))throw Error('文件已存在，请使用其他名称或从配置列表编辑');const content=await window.desk.generate(data);currentFile=name;$('editor').value=content;markDirty(true);await state();await show('config');output('配置已生成，点击「校验并保存」创建站点，然后重载生效。');});};
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=false;}});
 task(async()=>{const s=await state();await loadFile(s.files[0]);});
 setInterval(async()=>{if(busy||polling)return;polling=true;try{await state();if(activePage==='logs'&&$('auto-log').checked)await logs();}catch{/* keep last good state */}finally{polling=false;}},5000);

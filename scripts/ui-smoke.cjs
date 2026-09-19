@@ -10,6 +10,13 @@ app.on('browser-window-created',(_e,win)=>{
     try{
       await new Promise(r=>setTimeout(r,2500));
       const result=await win.webContents.executeJavaScript(`(async()=>{
+        const waitIdle=async()=>{
+          for(let i=0;i<40;i++){
+            if(!document.body.classList.contains('is-busy'))return;
+            await new Promise(r=>setTimeout(r,100));
+          }
+          throw Error('UI stayed busy');
+        };
         const state=await window.desk.state();
         if(state.running || !state.files.includes('nginx.conf'))throw Error('Bad initial state');
         if(!document.getElementById('editor').value.includes('worker_processes'))throw Error('Editor did not load');
@@ -20,13 +27,26 @@ app.on('browser-window-created',(_e,win)=>{
           list=document.getElementById('version-list').textContent;
           if(document.getElementById('engines').classList.contains('active')&&/nginx 1\.|无法获取官方列表|暂无可用版本/.test(list))break;
         }
+        await waitIdle();
         if(!document.getElementById('engines').classList.contains('active'))throw Error('Engines navigation failed');
         if(!/nginx 1\.|无法获取官方列表|暂无可用版本/.test(list))throw Error('Version list did not render: '+list);
+        document.querySelector('[data-page="config"]').click();
         await new Promise(r=>setTimeout(r,400));
+        await waitIdle();
+        const files=document.getElementById('files');
+        if(files.disabled)throw Error('Config files select stayed disabled');
+        if(![...files.options].some(o=>o.value==='nginx.conf'))throw Error('Config files select missing nginx.conf');
         document.querySelector('[data-page="sites"]').click();
         await new Promise(r=>setTimeout(r,400));
+        await waitIdle();
+        const kind=document.querySelector('[name="kind"]');
+        if(kind.disabled)throw Error('Site kind select stayed disabled');
+        kind.value='static';
+        if(kind.value!=='static')throw Error('Site kind select did not change');
+        kind.value='proxy';
         document.getElementById('site-form').requestSubmit();
         await new Promise(r=>setTimeout(r,1500));
+        await waitIdle();
         if(!document.getElementById('editor').value.includes('proxy_pass'))throw Error('Site generation failed');
         if(!document.getElementById('config').classList.contains('active'))throw Error('Navigation failed');
         document.querySelector('[data-page="overview"]').click();

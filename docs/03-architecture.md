@@ -43,7 +43,7 @@ preload 若 ok 为 false 则 throw，renderer 显示在页脚控制台
                                    │ contextBridge
                     ┌──────────────▼──────────────────┐
                     │  preload.cjs                    │
-                    │  12 个固定方法名，无动态 invoke │
+                    │  固定方法名，无动态 invoke      │
                     └──────────────┬──────────────────┘
                                    │ ipcRenderer.invoke
  Electron 主进程 ──────────────────┼──────────────────
@@ -261,6 +261,7 @@ zip 本身不长期保留；解压目录用完即删。bundled 版本会在 `ini
 | `generate` | 站点表单对象 | `siteConfig` |
 | `directory` | 无 | 系统选文件夹对话框 |
 | `folder` | 无 | `shell.openPath(runtime)` |
+| `confirm` | `{message,detail}` | 系统确认框，避免页面 `window.confirm` 卡住原生下拉框 |
 
 主进程**没有**通用「执行任意命令」或「读任意路径」的 IPC。这是安全边界，扩展功能时不要打破它。
 
@@ -273,9 +274,9 @@ zip 本身不长期保留；解压目录用完即删。bundled 版本会在 `ini
 | `activePage` | 当前页面 id |
 | `currentFile` | 编辑器打开的配置名 |
 | `dirty` | 编辑器是否未保存 |
-| `busy` | 是否有任务进行中（此时禁用除主题点以外的按钮） |
+| `busy` | 是否有任务进行中（按钮禁用；表单控件用 CSS 挡住点击，避免给隐藏的 select/input 设置 disabled） |
 | `polling` | 5 秒轮询是否在飞，防止重叠 |
 
-`task(fn)` 保证同一时间只有一个用户操作。轮询在 `busy` 时跳过，避免和保存打架。
+`task(fn)` 保证同一时间只有一个用户操作，忙时再次点击会在页脚提示「请等待当前操作完成后再试」。轮询在 `busy` 时跳过，避免和保存打架。确认框走主进程 `desk.confirm`，不用页面里的 `window.confirm`，以免切页后原生 `<select>` 无法弹出。切页动画只做透明度，避免祖先 `transform` 把下拉列表“点了没反应”。
 
 主题存在 `localStorage['nd-theme']`，通过 `<html data-theme="...">` 切换 CSS 变量。

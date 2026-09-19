@@ -23,7 +23,13 @@ else {
       deleteVersion:version=>manager.deleteVersion(version),
       generate:options=>siteConfig(options),
       directory:async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory']});return r.canceled?null:r.filePaths[0];},
-      folder:()=>shell.openPath(manager.root)
+      folder:()=>shell.openPath(manager.root),
+      confirm:async arg=>{
+        const message=typeof arg==='string'?arg:(arg&&arg.message)||'请确认';
+        const detail=typeof arg==='string'?'':(arg&&arg.detail)||'';
+        const {response}=await dialog.showMessageBox(win,{type:'question',buttons:['取消','确定'],defaultId:1,cancelId:0,message,detail});
+        return response===1;
+      }
     };
     for(const [name,fn] of Object.entries(handlers)) ipcMain.handle('desk:'+name,async(event,arg)=>{
       if(event.senderFrame?.url !== pathToFileURL(page).href)throw Error('不可信的请求来源');

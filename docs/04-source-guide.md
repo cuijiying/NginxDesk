@@ -80,7 +80,7 @@ win.webContents.on('will-navigate', e => e.preventDefault());
 ```js
 for (const name of [
   'state','read','save','action','logs','backups','backup',
-  'versions','installVersion','deleteVersion','generate','directory','folder'
+  'versions','installVersion','deleteVersion','generate','directory','folder','confirm'
 ]) {
   api[name] = async arg => {
     const r = await ipcRenderer.invoke('desk:' + name, arg);

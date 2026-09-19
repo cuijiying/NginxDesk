@@ -90,7 +90,9 @@ async function port() {
 | 初始未运行，且文件列表含 `nginx.conf` | Bad initial state |
 | 编辑器含 `worker_processes` | Editor did not load |
 | 点「引擎版本」，列表出现 `nginx 1.` 或离线提示 | Engines navigation / Version list |
-| 点「新建站点」提交默认表单，编辑器出现 `proxy_pass` | Site generation failed |
+| 再进配置页，文件下拉框可用且含 `nginx.conf` | Config files select stayed disabled / missing |
+| 再进新建站点，类型下拉框可切换 | Site kind select stayed disabled / did not change |
+| 提交默认表单，编辑器出现 `proxy_pass` | Site generation failed |
 | 自动跳到 config 页 | Navigation failed |
 | 主题切到 violet 再切回 cyan | Theme switch failed |
 
