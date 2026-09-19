@@ -7,7 +7,8 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance',()=>{if(win){win.restore();win.focus();}});
   app.whenReady().then(async()=>{
-    manager = new Manager(path.join(app.getPath('userData'),'runtime'),app.isPackaged?path.join(process.resourcesPath,'nginx'):path.join(__dirname,'../vendor/nginx'));
+    const userData=app.getPath('userData');
+    manager = new Manager(path.join(userData,'runtime'),app.isPackaged?path.join(process.resourcesPath,'nginx'):path.join(__dirname,'../vendor/nginx'),path.join(userData,'engines'));
     await manager.init();
     const page = path.join(__dirname,'index.html');
     const handlers = {
@@ -15,6 +16,8 @@ else {
       read: name=>manager.read(name), save:({name,content})=>manager.save(name,content),
       action:name=>manager.action(name), logs:type=>manager.logs(type),
       backups:()=>manager.backups(), backup:name=>manager.backup(name),
+      versions:()=>manager.versions(), installVersion:version=>manager.installVersion(version),
+      deleteVersion:version=>manager.deleteVersion(version),
       generate:options=>siteConfig(options),
       directory:async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory']});return r.canceled?null:r.filePaths[0];},
       folder:()=>shell.openPath(manager.root)
@@ -23,7 +26,7 @@ else {
       if(event.senderFrame?.url !== pathToFileURL(page).href)throw Error('不可信的请求来源');
       try{return {ok:true,data:await fn(arg)};}catch(e){return {ok:false,error:e.message};}
     });
-    win = new BrowserWindow({width:1260,height:850,minWidth:1000,minHeight:700,backgroundColor:'#f5f7fa',title:'Nginx Desk',autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+    win = new BrowserWindow({width:1280,height:860,minWidth:1100,minHeight:720,backgroundColor:'#05080f',title:'Nginx Desk',autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
     win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
     win.webContents.on('will-navigate',e=>e.preventDefault());
     let closing=false;
