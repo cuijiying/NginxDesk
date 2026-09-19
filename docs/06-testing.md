@@ -6,7 +6,7 @@
 
 | 命令 | 跑什么 | 要不要 GUI | 要不要真实 nginx | 典型耗时 |
 |------|--------|------------|------------------|----------|
-| `npm test` | `test/manager.test.cjs` | 否 | 是（Windows） | 约 1–2 分钟 |
+| `npm test` | `test/manager.test.cjs` | 否 | 是（有 bundled 引擎时） | 约 1–2 分钟 |
 | `npm run test:ui` | `scripts/ui-smoke.cjs` | 是，会闪真实窗口 | 会 `init()` 拷贝引擎，但不断言 HTTP 服务已启动 | 约 10–20 秒 |
 
 `package.json`：
@@ -28,15 +28,18 @@
 - `Manager.file` 拒绝：`../secrets`、`sites/../../secrets`
 - `assertVersion` 拒绝：空、两段、四段、字母后缀、路径穿越、夹换行
 - `parseNginxVersion` 从 `nginx version: nginx/1.31.6` 抽出版本
-- `parseWindowsVersions` 用一段伪造 HTML：只收下 Mainline/Stable/Legacy 里的 Windows zip 链接，忽略 `0.8.55` 和 `.tar.gz`
+- `parseWindowsVersions` / `parseOfficialVersions` 用伪造 HTML：Windows 只收 zip 链接，Unix 只收 tar.gz，忽略 `0.8.55` 和签名文件
+- `sameExecutable` 拒绝空路径和别人的 nginx
 
 **改校验规则时先改这一段**，否则集成测试会在真 nginx 上浪费时间。
 
-### 用例 2：真实 nginx 集成（仅 Windows）
+### 用例 2：真实 nginx 集成（有 bundled 引擎时）
 
 ```js
-{ skip: process.platform !== 'win32', timeout: 120000 }
+{ skip: !hasBundled, timeout: 120000 }
 ```
+
+`hasBundled` 检查 `vendor/nginx/nginx.exe`（Windows）或 `vendor/nginx/nginx`（Unix）。没有引擎时跳过，避免在未 prepare 的 CI 上误报。
 
 在临时目录 `os.tmpdir()/nginx desk test *` 建 Manager，bundled 指向仓库 `vendor/nginx`。流程相当于一份「用户说明书」的自动化：
 
@@ -57,7 +60,7 @@
 15. `quit` 后 running false；再 `installVersion(当前版本)` 成功，pinned 与 `-v` 一致
 16. `deleteVersion(当前版本)` 失败；非法/未下载失败；删除一份非当前缓存后 `installedEngines` 不再包含它
 
-`finally` 里会停 nginx。**临时目录故意保留**，失败时去 `%TEMP%` 打开对应文件夹看 `logs/error.log`。
+`finally` 里会停 nginx。**临时目录故意保留**，失败时去系统临时目录打开对应文件夹看 `logs/error.log`。
 
 ### 测试自己申请端口的方式
 
@@ -106,11 +109,11 @@ async function port() {
 | `preload` / `main` IPC | `npm run test:ui` + 必要时手点 |
 | HTML/CSS/导航/主题/表单 | `npm run test:ui` |
 | 打包配置 `package.json` `build` | `npm run dist`（见下一章） |
-| `prepare-nginx.ps1` | 删掉 `vendor/nginx` 再 prepare，核对 SHA256 |
+| `prepare-nginx.cjs` | 删掉 `vendor/nginx` 再 prepare，核对 SHA256 |
 
 提交前完整集：
 
-```powershell
+```bash
 npm test
 npm run test:ui
 ```
@@ -118,7 +121,7 @@ npm run test:ui
 ## 6.5 怎么加测试（建议写法）
 
 1. **纯函数**：直接 `assert.throws` / `assert.equal`，不建 Manager。
-2. **磁盘与进程**：`mkdtemp`，`try/finally` 里 `quit`。不要用开发者的 `%APPDATA%`。
+2. **磁盘与进程**：`mkdtemp`，`try/finally` 里 `quit`。不要用开发者的正式 userData。
 3. **端口**：动态分配，不要写死 8080。
 4. **断言用户可见字符串**时，改文案会打碎测试，这是有意的：界面/错误是产品的一部分。
 5. 不要在测试里 `download` 真实新版本（慢、依赖外网、给 nginx.org 添流量）。切版本用例复用**当前已有** bundled 版本即可。
@@ -127,12 +130,13 @@ npm run test:ui
 
 `artifacts/verification.md` 也写了：下列需要人工或后续补测：
 
-- NSIS 安装向导完整安装/卸载
+- 各平台安装向导 / DMG / AppImage 的完整安装卸载
 - Windows 11、域策略、无 `tar.exe` 的精简系统
+- macOS Gatekeeper / 未签名公证；Linux 各发行版依赖差异
 - 安装包代码签名
 - 大规模并发、官方 Windows nginx 的性能上限
 - 备份目录膨胀后的清理策略（产品尚未自动清理）
 - 关闭对话框三个按钮的 UI 自动化
 - 「保持 nginx 运行并退出」后再启动软件的衔接
 
-补测时优先自动化「关窗策略」和「安装/卸载是否保留 AppData」，这两项和数据安全相关。
+补测时优先自动化「关窗策略」和「安装/卸载是否保留用户数据」，这两项和数据安全相关。

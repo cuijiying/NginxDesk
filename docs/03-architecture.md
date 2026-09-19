@@ -20,7 +20,7 @@ main.cjs     →  校验 event.senderFrame.url 是本机 index.html
         ▼
 manager.cjs  →  进入独占队列
              →  nginx -t
-             →  spawn nginx.exe -p <runtime>/ -c conf/nginx.conf
+             →  spawn nginx(.exe) -p <runtime>/ -c conf/nginx.conf
              →  轮询 logs/nginx.pid + 核对可执行路径
         │
         ▼
@@ -57,7 +57,7 @@ preload 若 ok 为 false 则 throw，renderer 显示在页脚控制台
                                    │
                     ┌──────────────▼──────────────────┐
                     │  Manager（可单测）              │
-                    │  再往下才是磁盘和 nginx.exe     │
+                    │  再往下才是磁盘和 nginx 引擎    │
                     └─────────────────────────────────┘
 ```
 
@@ -76,21 +76,27 @@ new Manager(
 )
 ```
 
-`userData` 默认是 `%APPDATA%/nginx-desk`（产品名来自 `package.json` 的 `name`: `nginx-desk`）。
+`userData` 由 Electron 根据 `package.json` 的 `"name": "nginx-desk"` 决定：
+
+| 系统 | 默认 userData |
+|------|----------------|
+| Windows | `%APPDATA%/nginx-desk` |
+| macOS | `~/Library/Application Support/nginx-desk` |
+| Linux | `~/.config/nginx-desk` |
 
 | 路径 | 开发环境 | 安装后 |
 |------|----------|--------|
-| 应用代码 | 仓库 `src/` | `resources/app.asar` 内（或对应 app 目录） |
+| 应用代码 | 仓库 `src/` | `resources/app.asar` 内（macOS 在应用包 `Contents/Resources`） |
 | 内置 nginx | `vendor/nginx` | `resources/nginx`（`extraResources`） |
-| 用户工作目录 | `%APPDATA%/nginx-desk/runtime` | 同左（升级/卸载默认保留） |
-| 引擎缓存 | `%APPDATA%/nginx-desk/engines` | 同左 |
+| 用户工作目录 | `<userData>/runtime` | 同左（升级/卸载默认保留） |
+| 引擎缓存 | `<userData>/engines` | 同左 |
 | UI 冒烟测试 | `os.tmpdir()/nginx-desk-ui-<时间戳>` | 不使用正式 userData |
 
 工作目录初始化后的结构：
 
 ```
 runtime/
-├── nginx.exe          当前启用的引擎（从 bundled 或 pinned 引擎拷来）
+├── nginx.exe / nginx  当前启用的引擎（从 bundled 或 pinned 引擎拷来）
 ├── conf/
 │   ├── nginx.conf
 │   ├── mime.types     等辅助文件，仅在不存在时从 bundled 拷贝
@@ -105,7 +111,7 @@ runtime/
 └── temp/
 ```
 
-**升级软件不会覆盖已有 `nginx.conf` 和站点文件。** 只会补齐缺失目录，以及在辅助文件不存在时拷贝 `mime.types` 等。用户钉住的引擎版本写在 `engines/active`，升级后仍优先用钉住的 `nginx.exe`。
+**升级软件不会覆盖已有 `nginx.conf` 和站点文件。** 只会补齐缺失目录，以及在辅助文件不存在时拷贝 `mime.types` 等。用户钉住的引擎版本写在 `engines/active`，升级后仍优先用钉住的引擎文件。
 
 ## 3.4 启动生命周期
 
@@ -122,7 +128,7 @@ Manager.init()
   · 建 runtime、engines
   · 探测 bundled 版本，拷进 engines/<ver>/
   · 若有 active 且文件在，用 pinned；否则用 bundled
-  · 拷到 runtime/nginx.exe（文件被占用则忽略，只要已存在）
+  · 拷到 runtime/nginx.exe 或 runtime/nginx（文件被占用则忽略，只要已存在）
   · 建 conf/logs/html/...
   · 若没有 nginx.conf：写入默认主配置、default.conf、欢迎页
         │
@@ -148,7 +154,7 @@ renderer 立即 desk.state() + 载入第一个配置文件
    - 取消：什么都不做
    - 停止 nginx 并退出：`action('quit')` 再关
    - 保持运行并退出：不杀 nginx，只关窗口
-4. `window-all-closed` → `app.quit()`（Windows 上没有「只关窗留托盘」）
+4. `window-all-closed` → `app.quit()`（各平台都没有托盘常驻，关窗即退出应用）
 
 nginx 若以 `detached` 方式启动，保持运行是安全的：主进程结束不会 SIGKILL 子进程。
 
@@ -177,14 +183,14 @@ exclusive(fn) {
 `status()` 算法：
 
 1. 读 `logs/nginx.pid`，解析成正整数；读不到 → `{running:false}`
-2. PowerShell：`Get-CimInstance Win32_Process -Filter 'ProcessId = <pid>'`，取 `ExecutablePath`
-3. 和 `runtime/nginx.exe` 做大小写不敏感的全路径比较
-4. 只有完全一致才 `{running:true, pid}`
+2. 按平台核对可执行路径：Windows 用 PowerShell CIM；Linux 读 `/proc/<pid>/exe`；macOS 用 `lsof`，失败再退回 `ps`
+3. 和 `runtime/nginx.exe` 或 `runtime/nginx` 比较（Windows 忽略大小写；Unix 还接受 `nginx: master process <path> ...`）
+4. 只有确认是本实例才 `{running:true, pid}`
 
 因此：
 
 - 用户从别处启动的 nginx，即使 PID 文件碰巧留下数字，也不会被「停止」
-- 切版本必须先停，因为要替换正在运行的 `nginx.exe`（Windows 上会 EBUSY）
+- 切版本必须先停，因为要替换正在运行的引擎文件（Windows 上会 EBUSY；Unix 上覆盖后旧进程仍占着已删除 inode）
 
 ## 3.8 配置保存与回滚
 
@@ -214,17 +220,18 @@ exclusive(fn) {
 
 ```
 versions()
-  已安装 = engines/ 下形如 1.31.6 且含 nginx.exe 的目录
+  已安装 = engines/ 下形如 1.31.6 且含当前平台引擎文件的目录
   当前   = nginx -v，失败再 probe 磁盘
   可用   = 抓 download.html（10 分钟缓存，刷新按钮强制更新），按 h4 分成 mainline/stable/legacy
+           Windows 解析 nginx/Windows-x.y.z；Unix 解析 nginx-x.y.z.tar.gz
            网络失败则退回本地已安装列表
 
 installVersion(ver)
   必须未运行
   版本号 /^\d+\.\d+\.\d+$/
-  本地没有则：必须出现在官方列表 → 下载 zip → 大小与 PK 头检查
-             → tar.exe 解压 → 只拷 nginx.exe（防 zip 滑出目录）
-  拷到 runtime/nginx.exe，写 engines/active
+  本地没有则：必须出现在官方列表 → 下载 zip 或 tar.gz → 大小与文件头检查
+             → tar 解压 → Windows 只拷 nginx.exe；Unix 编译后拷 objs/nginx（防路径滑出目录）
+  拷到 runtime 引擎文件，写 engines/active
   再 -v 核对版本字符串一致
 
 deleteVersion(ver)

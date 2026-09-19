@@ -14,7 +14,7 @@ else {
     const handlers = {
       state:async()=>{
         const [status,files,version]=await Promise.all([manager.status(),manager.files(),manager.currentVersion()]);
-        return {...status,files,root:manager.root,version:version?`nginx version: nginx/${version}`:'nginx'};
+        return {...status,files,root:manager.root,platform:process.platform,version:version?`nginx version: nginx/${version}`:'nginx'};
       },
       read: name=>manager.read(name), save:({name,content})=>manager.save(name,content),
       action:name=>manager.action(name), logs:type=>manager.logs(type),

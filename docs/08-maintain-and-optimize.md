@@ -4,15 +4,15 @@
 
 ## 8.1 升级捆绑的 nginx
 
-目标：新安装包默认带更新的官方 Windows 构建。
+目标：新安装包默认带更新的官方构建。
 
-1. 在 https://nginx.org/en/download.html 确认 Windows zip 版本号
-2. 下载 zip，计算 SHA256
-3. 修改 `scripts/prepare-nginx.ps1` 的 `$version` 与 `$expected`
-4. 删除本地 `vendor/nginx`（以及旧 zip），执行 `npm run prepare:nginx`
+1. 在 https://nginx.org/en/download.html 确认版本号
+2. 下载 Windows zip **以及** Unix tar.gz，分别计算 SHA256
+3. 修改 `scripts/prepare-nginx.cjs` 的 `version` 与 `checksums`
+4. 删除本地 `vendor/nginx`（以及旧压缩包），在各目标操作系统上执行 `npm run prepare:nginx`
 5. `npm test`（集成测试会用新的 bundled 启动）
-6. 更新 README / 文档里写死的 `1.31.6` 字样
-7. `npm run dist`，在干净机器装一次
+6. 更新 README / 文档里写死的版本号字样
+7. 在各目标操作系统上 `npm run dist`，在干净机器装一次
 
 用户已在「引擎版本」里钉住的 `engines/active` **不会**被这次升级覆盖。这是有意的。若你希望「安装包强制全员升到 bundled」，需要改 `init()` 策略，并想清楚正在运行的实例、自定义补丁、回退路径。
 
@@ -63,14 +63,14 @@ TLS、upstream 块、缓存这类复杂配置，当前产品选择是「让用�
 
 | 点 | 现状 | 优化时注意 |
 |----|------|------------|
-| 5 秒轮询 `state()` | 每次 `-v` + 读 PID + PowerShell CIM | 勿改成 100ms；可考虑运行中降低 `-v` 频率 |
+| 5 秒轮询 `state()` | 每次 `-v` + 读 PID + 平台进程查询 | 勿改成 100ms；可考虑运行中降低 `-v` 频率 |
 | 日志 64 KB 尾部 | 避免把巨大 access.log 读进渲染进程 | 不要改成全文件 |
 | `command` timeout 15s | 卡住的 nginx 不会永久挂死 UI（busy 锁仍在） | 与 `test:ui` 超时一起考虑 |
 | 下载引擎 40 MB 上限 | 防异常响应撑爆内存 | `arrayBuffer` 仍是一次性进内存，极大文件不要盲目放宽 |
 | 独占队列 | 正确性优先 | 不要把只读 `logs` 放进队列造成界面卡顿 |
 | spawn detached | nginx 独立于 Electron | 不要改回 `execFile` 长驻等待 |
 
-PowerShell 查进程是 Windows 上较稳的「exe 路径」来源，但每次 status 都 spawn `powershell.exe`。若轮询成为 CPU 热点，可评估：
+Windows 上 PowerShell 查进程较稳，但每次 status 都 spawn `powershell.exe`。Linux 读 `/proc/<pid>/exe` 更轻；macOS 走 `lsof`/`ps`。若轮询成为 CPU 热点，可评估：
 
 - 缓存「上次 pid + 路径」在短时间内复用
 - 改用更轻的 API（需充分测试权限和 32/64 路径）
@@ -87,7 +87,7 @@ PowerShell 查进程是 Windows 上较稳的「exe 路径」来源，但每次 s
 - 按文件最多保留 N 份
 - 不要在 `init()` 里偷偷删
 
-备份与日志都在用户目录，文档和界面应继续提醒用系统权限保护 `%APPDATA%\nginx-desk`。
+备份与日志都在用户目录，文档和界面应继续提醒用系统权限保护 nginx-desk 用户数据目录。
 
 ## 8.8 安全维护清单
 
@@ -98,7 +98,7 @@ PowerShell 查进程是 Windows 上较稳的「exe 路径」来源，但每次 s
 - IPC 来源绑定 `index.html` 的 `file:` URL
 - 配置文件名白名单
 - 主配置 PID 路径锁定
-- 版本号正则；zip 魔数与解压路径约束
+- 版本号正则；zip/gzip 文件头与解压路径约束
 - 官方列表白名单后才下载
 - 进程归属按完整 ExecutablePath 比较
 
@@ -106,7 +106,7 @@ PowerShell 查进程是 Windows 上较稳的「exe 路径」来源，但每次 s
 
 - 渲染进程无 XSS 消毒库（当前无 innerHTML 拼接用户配置到 DOM；日志用 `textContent`）。以后若 `innerHTML` 渲染配置，等于把恶意配置变成 XSS，**禁止**
 - 未做安装包签名
-- 未做下载 zip 的 SHA256（应用内切换版本只检查大小和 PK 头）。强化方向：对照官方 `.zip.asc` 或公布哈希列表
+- 未做下载包的 SHA256（应用内切换版本只检查大小和文件头；`prepare:nginx` 才会核 SHA256）。强化方向：对照官方 `.asc` 或公布哈希列表
 - 站点 `listen port` 对所有接口开放，用户自己负责防火墙
 
 ## 8.9 产品边界（避免错误的「优化」）
@@ -119,7 +119,7 @@ PowerShell 查进程是 Windows 上较稳的「exe 路径」来源，但每次 s
 | 管理机器上已有的 nginx | 归属检测被绕过就可能停掉生产进程 |
 | 多实例（多 prefix） | UI、PID、端口、IPC 都按单实例假设 |
 | Let’s Encrypt 自动证书 | 要长期后台任务、端口 80、账户安全 |
-| 非 Windows | 官方 Windows zip、PowerShell CIM、NSIS 全绑死 |
+| 交叉编译三平台安装包 | 引擎二进制必须在目标 OS 上准备；签名/公证也绑在各平台工具链 |
 
 若做，应开新的架构讨论，而不是在 `action('start')` 里加几个 if。
 

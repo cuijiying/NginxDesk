@@ -4,6 +4,10 @@ const {execFile, spawn} = require('node:child_process');
 const {promisify} = require('node:util');
 const run = promisify(execFile);
 const delay = ms => new Promise(r => setTimeout(r, ms));
+const {
+  isWin, nginxBin, archiveExt, tarBin, execOpts,
+  sameExecutable, processExecutable, parseOfficialVersions, parseWindowsVersions
+} = require('./platform.cjs');
 
 const initialConfig = `worker_processes 1;
 pid logs/nginx.pid;
@@ -43,29 +47,8 @@ function networkError(e, fallback) {
   throw Error(fallback || msg || '网络请求失败');
 }
 
-function parseWindowsVersions(html) {
-  if (typeof html !== 'string' || !html.trim()) throw Error('未能解析官方版本列表');
-  const out = [];
-  const seen = new Set();
-  const take = (source, channel) => {
-    const re = /nginx\/Windows-(\d+\.\d+\.\d+)/gi;
-    let m;
-    while ((m = re.exec(source))) {
-      const version = m[1];
-      if (seen.has(version) || Number(version.split('.')[0]) < 1) continue;
-      seen.add(version);
-      out.push({version, channel});
-    }
-  };
-  const parts = html.split(/<h4\b[^>]*>/i);
-  for (const part of parts) {
-    const title = (part.match(/^[^<]+/) || [''])[0].toLowerCase();
-    const channel = title.includes('mainline') ? 'mainline' : title.includes('stable') ? 'stable' : title.includes('legacy') ? 'legacy' : '';
-    if (channel) take(part, channel);
-  }
-  if (!out.length) take(html, 'release');
-  if (!out.length) throw Error('未能解析官方版本列表');
-  return out;
+async function markExecutable(file) {
+  if (!isWin) await fs.chmod(file, 0o755).catch(() => {});
 }
 
 function siteConfig({port, host, kind, target}) {
@@ -89,10 +72,10 @@ class Manager {
     this.queue = Promise.resolve(); this._version = ''; this._official = null; this._officialAt = 0;
   }
   exclusive(fn) { const p = this.queue.then(fn); this.queue = p.catch(() => {}); return p; }
-  get exe() { return path.join(this.root, 'nginx.exe'); }
-  engineExe(version) { return path.join(this.enginesRoot, assertVersion(version), 'nginx.exe'); }
+  get exe() { return path.join(this.root, nginxBin); }
+  engineExe(version) { return path.join(this.enginesRoot, assertVersion(version), nginxBin); }
   async probeVersion(exe = this.exe) {
-    try { const r = await run(exe, ['-v'], {cwd:path.dirname(exe), windowsHide:true, timeout:10000}); return parseNginxVersion(`${r.stdout}${r.stderr}`); }
+    try { const r = await run(exe, ['-v'], execOpts({cwd:path.dirname(exe), timeout:10000})); return parseNginxVersion(`${r.stdout}${r.stderr}`); }
     catch { return ''; }
   }
   async currentVersion(force=false) {
@@ -124,7 +107,7 @@ class Manager {
     try {
       const res = await fetch('https://nginx.org/en/download.html', {redirect:'follow', signal:AbortSignal.timeout(20000), headers:{'User-Agent':'NginxDesk'}});
       if (!res.ok) throw Error(`获取官方版本列表失败：HTTP ${res.status}`);
-      const list = parseWindowsVersions(await res.text());
+      const list = parseOfficialVersions(await res.text());
       this._official = list; this._officialAt = Date.now();
       return list;
     } catch (e) {
@@ -143,27 +126,28 @@ class Manager {
     }
     const seen = new Set(available.map(item => item.version));
     for (const version of installed) if (!seen.has(version)) available.push({version, channel:'local'});
-    return {current, installed, available, error};
+    return {current, installed, available, error, platform: process.platform};
   }
   async downloadEngine(version) {
     version = assertVersion(version);
     await fs.mkdir(this.enginesRoot, {recursive:true});
-    const zip = path.join(this.enginesRoot, `nginx-${version}.zip`);
-    let haveZip = false;
+    const archive = path.join(this.enginesRoot, `nginx-${version}.${archiveExt}`);
+    let haveArchive = false;
     try {
-      const buf = await fs.readFile(zip);
-      haveZip = buf.length >= 1000 && buf[0] === 0x50 && buf[1] === 0x4b;
+      const buf = await fs.readFile(archive);
+      haveArchive = buf.length >= 1000 && (isWin ? buf[0] === 0x50 && buf[1] === 0x4b : buf[0] === 0x1f && buf[1] === 0x8b);
     } catch {}
-    if (!haveZip) {
+    if (!haveArchive) {
       try {
-        const res = await fetch(`https://nginx.org/download/nginx-${version}.zip`, {redirect:'follow', signal:AbortSignal.timeout(120000), headers:{'User-Agent':'NginxDesk'}});
+        const res = await fetch(`https://nginx.org/download/nginx-${version}.${archiveExt}`, {redirect:'follow', signal:AbortSignal.timeout(120000), headers:{'User-Agent':'NginxDesk'}});
         if (!res.ok) throw Error(`下载失败：HTTP ${res.status}`);
         const declared = Number(res.headers.get('content-length') || 0);
         if (declared > 40 * 1024 * 1024) throw Error('安装包过大');
         const buf = Buffer.from(await res.arrayBuffer());
         if (buf.length < 1000 || buf.length > 40 * 1024 * 1024) throw Error('安装包大小异常');
-        if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw Error('安装包不是有效的 zip 文件');
-        await fs.writeFile(zip, buf);
+        if (isWin && (buf[0] !== 0x50 || buf[1] !== 0x4b)) throw Error('安装包不是有效的 zip 文件');
+        if (!isWin && (buf[0] !== 0x1f || buf[1] !== 0x8b)) throw Error('安装包不是有效的 tar.gz 文件');
+        await fs.writeFile(archive, buf);
       } catch (e) {
         if (e instanceof Error && /^(下载失败|安装包)/.test(e.message)) throw e;
         networkError(e, '下载失败');
@@ -171,14 +155,21 @@ class Manager {
     }
     const tmp = await fs.mkdtemp(path.join(this.enginesRoot, 'extract-'));
     try {
-      await run('tar.exe', ['-xf', zip, '-C', tmp], {windowsHide:true, timeout:60000});
-      const exe = path.resolve(tmp, `nginx-${version}`, 'nginx.exe');
-      const rel = path.relative(path.resolve(tmp), exe);
+      await run(tarBin, ['-xf', archive, '-C', tmp], execOpts({timeout: 60000}));
+      const unpacked = path.resolve(tmp, `nginx-${version}`);
+      const rel = path.relative(path.resolve(tmp), unpacked);
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw Error('安装包结构异常');
-      await fs.access(exe);
       await fs.mkdir(path.dirname(this.engineExe(version)), {recursive:true});
-      await fs.copyFile(exe, this.engineExe(version));
-      await fs.unlink(zip).catch(()=>{});
+      if (isWin) {
+        const exe = path.join(unpacked, 'nginx.exe');
+        await fs.access(exe);
+        await fs.copyFile(exe, this.engineExe(version));
+      } else {
+        const {compileUnixNginx} = require('./unix-build.cjs');
+        await compileUnixNginx(unpacked, this.engineExe(version));
+      }
+      await markExecutable(this.engineExe(version));
+      await fs.unlink(archive).catch(()=>{});
     } finally {
       await fs.rm(tmp, {recursive:true, force:true});
     }
@@ -189,10 +180,11 @@ class Manager {
     try { await fs.access(this.engineExe(version)); }
     catch {
       const official = await this.fetchOfficialVersions();
-      if (!official.some(item => item.version === version)) throw Error('该版本不在官方 Windows 发行列表中');
+      if (!official.some(item => item.version === version)) throw Error('该版本不在官方发行列表中');
       await this.downloadEngine(version);
     }
     await fs.copyFile(this.engineExe(version), this.exe);
+    await markExecutable(this.exe);
     this._version = '';
     const current = await this.probeVersion() || parseNginxVersion(await this.command(['-v']).catch(()=>''));
     if (current !== version) throw Error(`版本切换异常，当前为 ${current || '未知'}`);
@@ -213,16 +205,18 @@ class Manager {
   async init() {
     await fs.mkdir(this.root, {recursive:true});
     await fs.mkdir(this.enginesRoot, {recursive:true});
-    const bundledExe = path.join(this.bundled, 'nginx.exe');
+    const bundledExe = path.join(this.bundled, nginxBin);
     const bundledVer = await this.probeVersion(bundledExe);
     if (bundledVer) {
       await fs.mkdir(path.dirname(this.engineExe(bundledVer)), {recursive:true});
       await fs.copyFile(bundledExe, this.engineExe(bundledVer), 1).catch(e => { if (e.code !== 'EEXIST') throw e; });
+      await markExecutable(this.engineExe(bundledVer));
     }
     const pinned = await this.pinnedVersion();
     const source = pinned ? this.engineExe(pinned) : bundledExe;
     // Keep a user-pinned engine across app upgrades; otherwise refresh the bundled binary.
     await fs.copyFile(source, this.exe).catch(async e => { if (e.code !== 'EBUSY' && e.code !== 'EPERM') throw e; await fs.access(this.exe); });
+    await markExecutable(this.exe);
     this._version = pinned || bundledVer || await this.probeVersion();
     // Never overwrite user configuration during application upgrades.
     for (const name of ['conf', 'conf/sites', 'logs', 'backups', 'html', 'temp']) await fs.mkdir(path.join(this.root, name), {recursive:true});
@@ -247,7 +241,7 @@ class Manager {
   }
   async read(name) { return fs.readFile(this.file(name), 'utf8'); }
   async command(args) {
-    try { const r = await run(this.exe, ['-p', this.root.replaceAll('\\','/')+'/', '-c', 'conf/nginx.conf', ...args], {cwd:this.root, windowsHide:true, timeout:15000, maxBuffer:1024*1024}); return r.stdout+r.stderr; }
+    try { const r = await run(this.exe, ['-p', this.root.replaceAll('\\','/')+'/', '-c', 'conf/nginx.conf', ...args], execOpts({cwd:this.root, timeout:15000, maxBuffer:1024*1024})); return r.stdout+r.stderr; }
     catch(e) { throw Error(e.stderr || e.message); }
   }
   async status() {
@@ -255,11 +249,8 @@ class Manager {
     try { pid = Number((await fs.readFile(path.join(this.root,'logs/nginx.pid'),'utf8')).trim()); } catch { return {running:false}; }
     if (!Number.isInteger(pid) || pid < 1) return {running:false};
     // Check the executable path as well as PID; never control another nginx installation.
-    const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($p){$p.ExecutablePath}`;
-    const {stdout} = await run('powershell.exe', ['-NoProfile','-NonInteractive','-Command',script], {windowsHide:true,timeout:10000});
-    const got = stdout.trim().replaceAll('/','\\').toLowerCase();
-    const mine = this.exe.replaceAll('/','\\').toLowerCase();
-    return {running: got === mine, pid};
+    const got = await processExecutable(pid);
+    return {running: sameExecutable(got, this.exe), pid};
   }
   async action(action) { return this.exclusive(async () => {
     const s = await this.status();
@@ -315,4 +306,4 @@ class Manager {
     catch(e){if(e.code==='ENOENT')return '暂无日志';throw e;}finally{await handle?.close();}
   }
 }
-module.exports = {Manager,siteConfig,assertVersion,parseNginxVersion,parseWindowsVersions};
+module.exports = {Manager,siteConfig,assertVersion,parseNginxVersion,parseWindowsVersions,parseOfficialVersions};

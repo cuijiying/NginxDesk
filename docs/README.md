@@ -27,8 +27,9 @@
 
 如果你只想立刻改代码，按下面做即可，细节再回看对应文档：
 
-```powershell
-# 需要：Windows 10/11 x64，Node.js 22.12 或更高
+```bash
+# 需要：Node.js 22.12 或更高
+# Windows 10/11、macOS 12+ 或主流 Linux x64/arm64
 npm ci
 npm run prepare:nginx
 npm test
@@ -36,6 +37,7 @@ npm start
 ```
 
 - 业务逻辑几乎都在 `src/manager.cjs`
+- 操作系统差异（可执行文件名、进程归属、官方包格式）在 `src/platform.cjs`
 - 窗口、IPC、退出确认在 `src/main.cjs`
 - 界面交互在 `src/renderer.js` / `src/index.html` / `src/style.css`
 - 渲染进程只能通过 `window.desk.*` 访问主进程，接口定义在 `src/preload.cjs`
@@ -49,8 +51,8 @@ npm start
 | 渲染进程 (Renderer) | 真正画界面的 Chromium 页面，**没有 Node.js** |
 | IPC | 渲染进程和主进程之间的消息通道 |
 | 工作目录 / prefix | nginx `-p` 指向的根目录，配置和日志都相对它 |
-| 内置引擎 | 安装包或 `vendor/nginx` 里自带的 `nginx.exe` |
-| 用户引擎缓存 | `%APPDATA%/nginx-desk/engines`，下载过的版本放这里 |
+| 内置引擎 | 安装包或 `vendor/nginx` 里自带的 `nginx.exe`（Windows）或 `nginx`（macOS/Linux） |
+| 用户引擎缓存 | 用户数据目录下的 `engines`，下载或编译过的版本放这里 |
 | 独占队列 | Manager 把启动/保存/切版本串行化，避免并发踩踏 |
 
 ## 仓库地图

@@ -27,6 +27,7 @@ async function state(){
   $('link-label').textContent=s.running?'ONLINE':'STANDBY';
   $('pid').textContent=s.running?`主进程 PID ${s.pid}`:'随时可以启动服务';
   $('version').textContent=s.version.replace('nginx version: ','');
+  $('engine-platform').textContent=({win32:'Windows 原生运行',darwin:'macOS 原生运行',linux:'Linux 原生运行'})[s.platform]||'本机原生运行';
   $('file-count').textContent=String(s.files.length).padStart(2,'0');
   $('root').textContent=s.root;
   const names=[...s.files];if(currentFile&&!names.includes(currentFile))names.push(currentFile);
@@ -43,6 +44,9 @@ async function show(page){activePage=page;document.querySelectorAll('.page').for
 async function logs(){$('log-content').textContent=await window.desk.logs($('log-type').value);}
 async function versions(refresh=false){
   const data=await window.desk.versions(!!refresh);
+  $('engines-hint').textContent=data.platform==='win32'
+    ?'从 nginx.org 下载官方 Windows zip 并替换当前引擎。安装或删除前需先停止服务；正在使用的引擎不能删除；配置、日志与站点文件会保留。'
+    :'从 nginx.org 下载官方源码并在本机编译后替换当前引擎。需要 C 编译器和 make（macOS：Xcode Command Line Tools；Linux：gcc/make 及常用开发库）。安装可能需要几分钟；正在使用的引擎不能删除；配置会保留。';
   const box=$('version-list');
   box.replaceChildren();
   if(data.error){const p=document.createElement('p');p.className='muted';p.textContent='无法获取官方列表：'+data.error+'。仍可启用已下载的版本。';box.append(p);}

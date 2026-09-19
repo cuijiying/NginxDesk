@@ -4,23 +4,24 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Windows 10/11 x64 |
+| 操作系统 | Windows 10/11、macOS 12+ 或主流 Linux（x64 / arm64） |
 | Node.js | 22.12 或更高（`node -v`） |
 | npm | 随 Node 安装即可 |
+| 编译工具 | 仅 macOS / Linux 的 `prepare:nginx` 与应用内安装新版本需要：C 编译器、make；Linux 建议再装 pcre/zlib/openssl 开发库 |
 | 网络 | 第一次 `npm ci`、`prepare:nginx`、拉官方版本列表需要 |
 | Git | 可选，克隆仓库用 |
 
-不需要预先安装 nginx，也不需要配置 `PATH`。
+不需要预先安装 nginx，也不需要配置 `PATH`。请在目标操作系统上开发和打包。
 
-建议用 PowerShell 或 Windows Terminal，工作目录切到仓库根：
+工作目录切到仓库根后：
 
-```powershell
-cd D:\git_files\soft-tools\NginxDesk
+```bash
+cd /path/to/NginxDesk
 ```
 
 ## 5.2 第一次把项目跑起来
 
-```powershell
+```bash
 npm ci
 npm run prepare:nginx
 npm test
@@ -30,13 +31,13 @@ npm start
 | 命令 | 成功时你应看到 |
 |------|----------------|
 | `npm ci` | `node_modules/` 出现，`electron` 已下载 |
-| `prepare:nginx` | `vendor/nginx/nginx.exe` 存在；已存在则立刻 exit 0 |
-| `npm test` | 两个测试通过（集成测试约 1–2 分钟，要起真 nginx） |
+| `prepare:nginx` | Windows：`vendor/nginx/nginx.exe`；macOS/Linux：`vendor/nginx/nginx`。已存在则立刻结束 |
+| `npm test` | 纯函数测试通过；有 bundled 引擎时集成测试约 1–2 分钟 |
 | `npm start` | 弹出深色窗口「Nginx Desk」 |
 
 `npm ci` 按 `package-lock.json` 安装，团队协作时比 `npm install` 更可复现。只有当你有意升级依赖时才用 `npm install`。
 
-若 `prepare:nginx` 报 checksum mismatch：不要强行跳过。核对 `scripts/prepare-nginx.ps1` 里的版本和 SHA256 是否仍对应 nginx.org 上的文件。
+若 `prepare:nginx` 报 checksum mismatch：不要强行跳过。核对 `scripts/prepare-nginx.cjs` 里当前平台对应的版本和 SHA256 是否仍对应 nginx.org 上的文件。
 
 ## 5.3 日常开发循环
 
@@ -46,13 +47,13 @@ npm start
 4. 改 Manager 或纯函数后跑 `npm test`
 5. 改窗口、preload、导航、表单后跑 `npm run test:ui`
 
-渲染进程改动想快一点：窗口聚焦时试 `Ctrl+R` 刷新页面。主进程、preload、Manager **必须整进程重启** 才生效。
+窗口聚焦时试刷新页面：Windows / Linux 用 `Ctrl+R`，macOS 用 `Cmd+R`。主进程、preload、Manager **必须整进程重启** 才生效。
 
 ## 5.4 调试渲染进程（界面）
 
 窗口打开后：
 
-1. `Ctrl+Shift+I` 打开 Chromium DevTools
+1. `Ctrl+Shift+I`（macOS：`Cmd+Option+I`）打开 Chromium DevTools
 2. **Console**：看 `renderer.js` 抛出的错误
 3. **Elements**：看 `data-theme`、`.page.active`、按钮 `disabled`
 4. **Application → Local Storage**：键 `nd-theme`
@@ -89,21 +90,39 @@ await window.desk.state()
 
 界面「运行日志」读的是工作目录里的文件，不是 Electron 日志。
 
-1. 点「打开工作目录」，确认路径类似 `C:\Users\<你>\AppData\Roaming\nginx-desk\runtime`
+1. 点「打开工作目录」，确认路径类似：
+   - Windows：`C:\Users\<你>\AppData\Roaming\nginx-desk\runtime`
+   - macOS：`~/Library/Application Support/nginx-desk/runtime`
+   - Linux：`~/.config/nginx-desk/runtime`
 2. 看 `logs/error.log`（启动失败、端口占用、配置错误的第一现场）
-3. 看 `logs/nginx.pid`：有数字但界面显示已停止 → 归属检测认为 exe 路径不匹配
+3. 看 `logs/nginx.pid`：有数字但界面显示已停止 → 归属检测认为引擎路径不匹配
 4. 在该目录用命令行复现（把路径换成你的 root）：
 
-```powershell
+```bash
+# Windows
 .\nginx.exe -p ./ -c conf/nginx.conf -t
 .\nginx.exe -p ./ -c conf/nginx.conf -v
+
+# macOS / Linux
+./nginx -p ./ -c conf/nginx.conf -t
+./nginx -p ./ -c conf/nginx.conf -v
 ```
 
-端口冲突：Windows 上 `netstat -ano | findstr :8080` 看谁占用。本软件**不会**去结束其他进程，只会在启动超时后让你看错误日志。
+端口冲突：
+
+```bash
+# Windows
+netstat -ano | findstr :8080
+
+# macOS / Linux
+lsof -iTCP:8080 -sTCP:LISTEN
+```
+
+本软件**不会**去结束其他进程，只会在启动超时后让你看错误日志。
 
 ## 5.7 隔离实验，避免弄脏日常数据
 
-日常 `npm start` 和安装版共用 `%APPDATA%/nginx-desk`。若要干净环境：
+日常 `npm start` 和安装版共用同一用户数据目录。若要干净环境：
 
 - 跑 `npm run test:ui`（自动用临时 userData）
 - 或设置环境变量再启动（Electron 支持 `ELECTRON_USER_DATA` 的做法因版本而异；更稳的是在实验用的 main 里 `app.setPath('userData', ...)`，参考 `scripts/ui-smoke.cjs`）
@@ -144,6 +163,6 @@ await window.desk.state()
 |------|------|------|
 | 改了 `manager.cjs` 窗口行为不变 | 没重启 Electron | 关窗再 `npm start` |
 | 改了 `preload.cjs` `window.desk` 仍是旧 API | preload 只在窗口创建时加载 | 必须重启 |
-| 改了 CSS 没变 | 缓存或没刷新 | `Ctrl+R` 或重启 |
+| 改了 CSS 没变 | 缓存或没刷新 | `Ctrl+R` / `Cmd+R` 或重启 |
 | `window.desk` 是 `undefined` | preload 路径错或沙箱/隔离被改坏 | 检查 `webPreferences` |
-| 初始化失败 | 没有 `vendor/nginx` | `npm run prepare:nginx` |
+| 初始化失败 | 没有 `vendor/nginx` 下的当前平台引擎 | `npm run prepare:nginx` |

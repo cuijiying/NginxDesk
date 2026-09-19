@@ -108,11 +108,12 @@ contextBridge.exposeInMainWorld('desk', api);
 
 ```js
 module.exports = {
-  Manager, siteConfig, assertVersion, parseNginxVersion, parseWindowsVersions
+  Manager, siteConfig, assertVersion, parseNginxVersion,
+  parseWindowsVersions, parseOfficialVersions
 };
 ```
 
-后四个是纯函数，测试可以直接喂字符串，不必起 nginx。
+其余导出是纯函数，测试可以直接喂字符串，不必起 nginx。版本列表解析实际定义在 `src/platform.cjs`，Manager 再转出以便测试继续从同一入口 require。
 
 ### 纯函数
 
@@ -120,10 +121,11 @@ module.exports = {
 |------|------|-------------|
 | `assertVersion` | 字符串 | 必须 `x.y.z` 数字三段 |
 | `parseNginxVersion` | `nginx -v` 文本 | `1.31.6` 或空串 |
-| `parseWindowsVersions` | download.html | `{version, channel}[]`，按 h4 分区 |
+| `parseOfficialVersions` | download.html + 平台 | `{version, channel}[]`，Windows 抓 zip 名，Unix 抓 tar.gz |
+| `parseWindowsVersions` | download.html | 等价于 `parseOfficialVersions(html, 'win32')` |
 | `siteConfig` | 表单字段 | 一段 `server { ... }` |
 
-`parseWindowsVersions` 用 `<h4>Mainline/Stable/Legacy` 切块，再抓 `nginx/Windows-x.y.z`。抓不到分区时退化为整页扫描，channel 记为 `release`。主版本号 `< 1` 的旧包直接丢掉。
+`parseOfficialVersions` 用 `<h4>Mainline/Stable/Legacy` 切块。Windows 抓 `nginx/Windows-x.y.z`；macOS / Linux 抓 `nginx-x.y.z.tar.gz`（忽略 `.asc` 和 Windows zip）。抓不到分区时退化为整页扫描，channel 记为 `release`。主版本号 `< 1` 的旧包直接丢掉。操作系统差异还在 `src/platform.cjs`：`nginxBin`、`processExecutable`、`sameExecutable`。
 
 ### `Manager` 构造
 
@@ -132,10 +134,10 @@ constructor(root, bundled, enginesRoot)
 ```
 
 - `root`：用户工作目录
-- `bundled`：只读的官方发行目录（含 `nginx.exe` 和 `conf/mime.types` 等）
+- `bundled`：只读的官方发行目录（含 `nginx.exe` 或 `nginx`，以及 `conf/mime.types` 等）
 - `enginesRoot`：可写缓存；缺省为 `root/engines`（测试里常省略第三参）
 
-`this.exe` 永远是 `root/nginx.exe`，所有 `command()` 都打这一份。
+`this.exe` 永远是 `root/nginx.exe`（Windows）或 `root/nginx`（Unix），所有 `command()` 都打这一份。
 
 ### `init()`
 
@@ -144,7 +146,7 @@ constructor(root, bundled, enginesRoot)
 1. `mkdir` root、engines
 2. 探测 bundled 版本，`copyFile(..., COPYFILE_EXCL)` 进 engines（已存在则忽略）
 3. 有 `engines/active` 且对应 exe 在 → 用它；否则用 bundled
-4. 拷到 `root/nginx.exe`；若 EBUSY/EPERM（正在运行）则只要文件还在就放过
+4. 拷到 `root` 下的引擎文件；若 EBUSY/EPERM（正在运行）则只要文件还在就放过；Unix 上随后 `chmod 0755`
 5. 建 `conf`、`conf/sites`、`logs`、`backups`、`html`、`temp`
 6. 辅助 conf 文件不存在才从 bundled 拷
 7. 没有 `nginx.conf` 才写默认三件套
@@ -163,7 +165,7 @@ constructor(root, bundled, enginesRoot)
 ### `command(args)`
 
 ```text
-nginx.exe -p <root正斜杠>/ -c conf/nginx.conf <额外参数>
+nginx(.exe) -p <root正斜杠>/ -c conf/nginx.conf <额外参数>
 cwd = root
 timeout 15s
 把 stdout+stderr 拼成一个字符串
@@ -206,8 +208,8 @@ timeout 15s
 | `pinnedVersion()` | 读 `engines/active` 并确认 exe 存在 |
 | `installedEngines()` | 扫版本号目录 |
 | `fetchOfficialVersions()` | HTTPS GET，20s 超时，UA=`NginxDesk` |
-| `downloadEngine` | 40 MB 上限、zip 魔数 `PK`、`tar -xf`、路径必须在临时目录内 |
-| `installVersion` | 独占、必须停止、官方白名单、拷 exe、写 active、核对 `-v` |
+| `downloadEngine` | 40 MB 上限、zip `PK` 或 gzip 头、`tar -xf`；Unix 再编译 `objs/nginx` |
+| `installVersion` | 独占、必须停止、官方白名单、拷引擎、写 active、核对 `-v` |
 | `deleteVersion` | 独占、必须已下载、禁止删除当前/钉住版本、删除 `engines/<ver>` |
 
 ## 4.5 `src/index.html` — 结构即功能
@@ -253,12 +255,13 @@ Tab 键在 textarea 里插入四个空格，避免焦点跑掉。
 
 | 文件 | 谁调用 | 做什么 |
 |------|--------|--------|
-| `scripts/prepare-nginx.ps1` | `npm run prepare:nginx` / `dist` | 下载并校验官方 zip 到 `vendor/nginx` |
+| `scripts/prepare-nginx.cjs` | `npm run prepare:nginx` / `dist` | 下载并校验官方发行包到 `vendor/nginx`；Unix 会编译 |
+| `scripts/prepare-nginx.ps1` | 可选 | 调用上面的 Node 脚本 |
 | `scripts/ui-smoke.cjs` | `npm run test:ui` | 改 `userData` 后 `require('../src/main.cjs')`，窗口加载完注入断言 |
-| `test/manager.test.cjs` | `npm test` | 输入约束 + 真实 nginx 集成（非 Windows 跳过集成段） |
+| `test/manager.test.cjs` | `npm test` | 输入约束 + 真实 nginx 集成（没有 bundled 引擎时跳过集成段） |
 | `artifacts/verification.md` | 人工记录 | 某次环境的测试/打包结果，不是自动生成 |
 
-UI 冒烟**复用真实 main**，所以能测到 preload、IPC 来源校验、`init()` 默认配置。它把 `userData` 指到临时目录，不会污染你的日常 `%APPDATA%`。
+UI 冒烟**复用真实 main**，所以能测到 preload、IPC 来源校验、`init()` 默认配置。它把 `userData` 指到临时目录，不会污染你的日常用户数据目录。
 
 ## 4.9 改动时的依赖方向
 
@@ -273,10 +276,10 @@ style.css  ──► index.html         │
                                main.cjs ──► dialog / shell
                                   │
                                   ▼
-                              manager.cjs ──► nginx.exe / 磁盘 / nginx.org
-                                  ▲
-                                  │
-                         test/manager.test.cjs
+                              manager.cjs ──► nginx 引擎 / 磁盘 / nginx.org
+                                  ▲                 │
+                                  │                 ▼
+                         test/manager.test.cjs   platform.cjs / unix-build.cjs
 ```
 
 依赖应当单向。**不要**让 `manager.cjs` `require('electron')`，否则测试和未来的 CLI 复用都会变难。

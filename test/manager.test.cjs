@@ -1,11 +1,14 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
+const fsSync=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
 const net=require('node:net');
 const http=require('node:http');
-const {Manager,siteConfig,assertVersion,parseNginxVersion,parseWindowsVersions}=require('../src/manager.cjs');
+const {Manager,siteConfig,assertVersion,parseNginxVersion,parseWindowsVersions,parseOfficialVersions}=require('../src/manager.cjs');
+const {nginxBin,sameExecutable}=require('../src/platform.cjs');
+const hasBundled=fsSync.existsSync(path.resolve('vendor/nginx',nginxBin));
 test('reject injection and invalid ports',()=>{
   for(const port of [0,65536,'80;'])assert.throws(()=>siteConfig({port,host:'localhost',kind:'proxy',target:'http://localhost'}));
   assert.throws(()=>siteConfig({port:8080,host:'x;}',kind:'static',target:'C:/www'}));
@@ -27,8 +30,30 @@ test('parse official Windows version list and reject unsafe versions',()=>{
     {version:'1.28.3',channel:'legacy'}
   ]);
   assert.throws(()=>parseWindowsVersions('<html>no versions</html>'));
+  const unixHtml=`<h4>Mainline version</h4><a href="/download/nginx-1.31.6.tar.gz">nginx-1.31.6</a> pgp
+<a href="/download/nginx-1.31.6.zip">nginx/Windows-1.31.6</a>
+<h4>Stable version</h4><a href="/download/nginx-1.30.5.tar.gz">nginx-1.30.5</a>
+<h4>Legacy versions</h4><a href="/download/nginx-1.28.3.tar.gz">nginx-1.28.3</a>
+<a href="/download/nginx-0.8.55.tar.gz">nginx-0.8.55</a>
+<a href="/download/nginx-1.31.6.tar.gz.asc">sig</a>`;
+  assert.deepEqual(parseOfficialVersions(unixHtml,'linux'),[
+    {version:'1.31.6',channel:'mainline'},
+    {version:'1.30.5',channel:'stable'},
+    {version:'1.28.3',channel:'legacy'}
+  ]);
+  assert.throws(()=>parseOfficialVersions('<html>no versions</html>','darwin'));
 });
-test('files and backups recreate missing folders',{skip:process.platform!=='win32'},async()=>{
+test('process ownership compares executable paths per platform',()=>{
+  const mine=process.platform==='win32'?'C:/Users/me/runtime/nginx.exe':'/tmp/nginx-desk/runtime/nginx';
+  assert.equal(sameExecutable(mine,mine),true);
+  assert.equal(sameExecutable('',mine),false);
+  assert.equal(sameExecutable('/usr/sbin/nginx',mine),false);
+  if(process.platform!=='win32'){
+    assert.equal(sameExecutable(`nginx: master process ${mine} -p /tmp/nginx-desk/runtime/`,mine),true);
+    assert.equal(sameExecutable(`${mine} (deleted)`,mine),true);
+  }
+});
+test('files and backups recreate missing folders',{skip:!hasBundled},async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'nginx desk dirs '));
   const m=new Manager(root,path.resolve('vendor/nginx'));
   await m.init();
@@ -38,7 +63,7 @@ test('files and backups recreate missing folders',{skip:process.platform!=='win3
   assert.deepEqual(await m.backups(),[]);
 });
 async function port(){const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const p=server.address().port;await new Promise(r=>server.close(r));return p;}
-test('real nginx: configuration rollback, backups, start, HTTP, reload, stop',{skip:process.platform!=='win32',timeout:120000},async()=>{
+test('real nginx: configuration rollback, backups, start, HTTP, reload, stop',{skip:!hasBundled,timeout:120000},async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'nginx desk test '));
   const m=new Manager(root,path.resolve('vendor/nginx'));
   const upstream=http.createServer((req,res)=>res.end('upstream-ok'));

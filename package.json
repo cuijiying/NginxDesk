@@ -1,17 +1,20 @@
 {
   "name": "nginx-desk",
   "version": "1.0.0",
-  "description": "Windows nginx management desktop",
+  "description": "Cross-platform nginx management desktop",
   "author": "Jiying Cui",
   "license": "MIT",
   "private": true,
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
-    "prepare:nginx": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-nginx.ps1",
+    "prepare:nginx": "node scripts/prepare-nginx.cjs",
     "test": "node --test test/*.test.cjs",
     "test:ui": "electron scripts/ui-smoke.cjs",
-    "dist": "npm run prepare:nginx && electron-builder --win nsis --x64"
+    "dist": "npm run prepare:nginx && electron-builder --publish never",
+    "dist:win": "npm run prepare:nginx && electron-builder --win nsis --x64",
+    "dist:mac": "npm run prepare:nginx && electron-builder --mac dmg zip",
+    "dist:linux": "npm run prepare:nginx && electron-builder --linux AppImage deb"
   },
   "devDependencies": { "electron": "44.4.1", "electron-builder": "26.8.1" },
   "build": {
@@ -20,6 +23,8 @@
     "files": ["src/**/*", "package.json"],
     "extraResources": [{"from": "vendor/nginx", "to": "nginx"}],
     "win": {"target": "nsis", "signAndEditExecutable": false},
+    "mac": {"target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "identity": null},
+    "linux": {"target": ["AppImage", "deb"], "category": "Development", "maintainer": "Jiying Cui"},
     "nsis": {"oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "deleteAppDataOnUninstall": false},
     "directories": {"output": "dist"}
   }
