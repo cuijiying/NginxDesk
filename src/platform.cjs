@@ -44,6 +44,48 @@ function sameExecutable(got, mine) {
   return new RegExp(`(?:^|[\\s:])${escaped}(?:$|[\\s])`).test(raw);
 }
 
+async function runningNginxProcesses() {
+  const out = [];
+  if (isWin) {
+    const script = `Get-CimInstance Win32_Process -Filter "Name = 'nginx.exe'" | ForEach-Object { if ($_.ExecutablePath) { $_.ExecutablePath + [char]9 + $_.CommandLine } }`;
+    try {
+      const {stdout} = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], execOpts({timeout: 12000}));
+      for (const line of stdout.split(/\r?\n/)) {
+        const raw = line.trim();
+        if (!raw) continue;
+        const tab = raw.indexOf('\t');
+        out.push({exe: tab === -1 ? raw : raw.slice(0, tab), commandLine: tab === -1 ? '' : raw.slice(tab + 1)});
+      }
+    } catch {}
+    return out;
+  }
+  if (process.platform === 'linux') {
+    try {
+      const names = await fs.readdir('/proc');
+      for (const pid of names) {
+        if (!/^\d+$/.test(pid)) continue;
+        try {
+          const exe = (await fs.readlink(`/proc/${pid}/exe`)).replace(/ \(deleted\)$/, '');
+          if (!/(?:^|\/)nginx$/.test(exe)) continue;
+          let commandLine = '';
+          try { commandLine = (await fs.readFile(`/proc/${pid}/cmdline`)).toString('utf8').replace(/\0/g, ' ').trim(); } catch {}
+          out.push({exe, commandLine});
+        } catch {}
+      }
+    } catch {}
+    return out;
+  }
+  try {
+    const {stdout} = await run('ps', ['-ax', '-ww', '-o', 'command='], execOpts({timeout: 8000}));
+    for (const line of stdout.split(/\r?\n/)) {
+      if (!/(?:^|[\/\s])nginx(?:\s|:|$)/.test(line) || /(?:grep|pgrep)\b/.test(line)) continue;
+      const m = line.match(/((?:\/|\.\/)\S*nginx)(?:\s|$)/);
+      if (m) out.push({exe: m[1], commandLine: line.trim()});
+    }
+  } catch {}
+  return out;
+}
+
 async function processExecutable(pid) {
   if (!Number.isInteger(pid) || pid < 1) return '';
   if (isWin) {
@@ -101,5 +143,5 @@ function parseWindowsVersions(html) {
 module.exports = {
   isWin, isMac, nginxBin, archiveExt, tarBin,
   execOpts, platformLabel, userDataHint, normalizeExe, sameExecutable,
-  processExecutable, parseOfficialVersions, parseWindowsVersions
+  processExecutable, runningNginxProcesses, parseOfficialVersions, parseWindowsVersions
 };

@@ -4,11 +4,11 @@ const crypto = require('node:crypto');
 const {execFile} = require('node:child_process');
 const {promisify} = require('node:util');
 const run = promisify(execFile);
-const {isWin, nginxBin, execOpts, normalizeExe} = require('./platform.cjs');
+const {isWin, nginxBin, execOpts, normalizeExe, runningNginxProcesses} = require('./platform.cjs');
 const {Manager} = require('./manager.cjs');
 const {localIO, connectSsh} = require('./io.cjs');
 const {
-  parseNginxBuild, parsePidDirective, parseLogDirective,
+  parseNginxBuild, parsePidDirective, parseLogDirective, parseNginxArgv,
   assertSafeHost, assertSafeUser, assertSafePath, resolveAgainst
 } = require('./inspect.cjs');
 
@@ -138,32 +138,36 @@ class Hub {
   async discoverLocal() {
     const found = [];
     const seen = new Set();
-    const candidates = isWin
+    const hintsByExe = new Map();
+    const addHint = (exe, hints = {}) => {
+      const resolved = path.resolve(exe);
+      const key = normalizeExe(resolved);
+      const prev = hintsByExe.get(key) || {};
+      hintsByExe.set(key, {
+        exe: prev.exe || resolved,
+        prefix: hints.prefix || prev.prefix || '',
+        conf: hints.conf || prev.conf || ''
+      });
+    };
+    const common = isWin
       ? ['C:\\nginx\\nginx.exe', 'C:\\Program Files\\nginx\\nginx.exe']
       : ['/usr/sbin/nginx', '/usr/bin/nginx', '/usr/local/sbin/nginx', '/usr/local/bin/nginx', '/opt/homebrew/opt/nginx/bin/nginx', '/opt/homebrew/bin/nginx'];
-    try {
-      const {stdout} = await run(isWin ? 'where.exe' : '/bin/sh', isWin ? ['nginx'] : ['-c', 'command -v nginx'], execOpts({timeout: 8000}));
-      for (const line of stdout.split(/\r?\n/)) if (line.trim()) candidates.unshift(line.trim());
-    } catch {}
-    for (const exe of candidates) {
-      const resolved = path.resolve(exe);
-      if (seen.has(normalizeExe(resolved))) continue;
-      seen.add(normalizeExe(resolved));
-      if (normalizeExe(resolved) === normalizeExe(this.managed.exe)) continue;
+    const [pathHits, running] = await Promise.all([
+      listPathNginx(),
+      runningNginxProcesses().catch(() => [])
+    ]);
+    for (const proc of running) {
+      if (!proc.exe) continue;
+      addHint(proc.exe, parseNginxArgv(proc.commandLine));
+    }
+    for (const exe of [...pathHits, ...common]) addHint(exe);
+    for (const candidate of hintsByExe.values()) {
+      const key = normalizeExe(candidate.exe);
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await fs.access(resolved);
-        const text = await localIO.exec(resolved, ['-V'], {cwd: path.dirname(resolved), timeout: 8000});
-        const build = parseNginxBuild(text);
-        const prefix = build.prefix || path.dirname(resolved);
-        found.push({
-          exe: resolved,
-          version: build.version,
-          prefix,
-          conf: build.conf || path.join(prefix, 'conf', 'nginx.conf'),
-          pid: build.pid || '',
-          errorLog: build.errorLog || '',
-          accessLog: build.accessLog || ''
-        });
+        const item = await probeLocalInstall(candidate.exe, candidate, this.managed.exe);
+        if (item) found.push(item);
       } catch {}
     }
     return found;
@@ -382,4 +386,57 @@ class Hub {
   }
 }
 
-module.exports = {Hub, MANAGED_ID};
+async function listPathNginx() {
+  try {
+    const {stdout} = await run(
+      isWin ? 'where.exe' : '/bin/sh',
+      isWin ? [nginxBin] : ['-c', 'command -v nginx'],
+      execOpts({timeout: 8000})
+    );
+    return stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  } catch { return []; }
+}
+
+async function existingDir(dir) {
+  if (!dir) return '';
+  try {
+    const stat = await fs.stat(dir);
+    return stat.isDirectory() ? dir : '';
+  } catch { return ''; }
+}
+
+async function existingFile(file) {
+  if (!file) return '';
+  try {
+    await fs.access(file);
+    return file;
+  } catch { return ''; }
+}
+
+async function probeLocalInstall(exe, hints = {}, skipExe = '') {
+  const resolved = path.resolve(exe);
+  if (skipExe && normalizeExe(resolved) === normalizeExe(skipExe)) return null;
+  await fs.access(resolved);
+  const home = path.dirname(resolved);
+  const text = await localIO.exec(resolved, ['-V'], {cwd: home, timeout: 8000});
+  const build = parseNginxBuild(text);
+  const prefix = await existingDir(hints.prefix)
+    || await existingDir(build.prefix)
+    || home;
+  const conf = await existingFile(hints.conf && path.isAbsolute(hints.conf) ? hints.conf : '')
+    || await existingFile(build.conf && path.isAbsolute(build.conf) ? build.conf : '')
+    || await existingFile(resolveAgainst(prefix, hints.conf || build.conf || path.join('conf', 'nginx.conf'), false))
+    || await existingFile(path.join(home, 'conf', 'nginx.conf'))
+    || resolveAgainst(prefix, 'conf/nginx.conf', false);
+  return {
+    exe: resolved,
+    version: build.version,
+    prefix,
+    conf,
+    pid: build.pid || '',
+    errorLog: build.errorLog || '',
+    accessLog: build.accessLog || ''
+  };
+}
+
+module.exports = {Hub, MANAGED_ID, probeLocalInstall};

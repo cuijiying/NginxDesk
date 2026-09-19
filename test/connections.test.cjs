@@ -4,10 +4,10 @@ const fs=require('node:fs/promises');
 const fsSync=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
-const {Hub}=require('../src/hub.cjs');
+const {Hub,probeLocalInstall}=require('../src/hub.cjs');
 const {Manager,attachedConfName,siteConfig}=require('../src/manager.cjs');
 const {
-  parseNginxBuild, parsePidDirective, parseLogDirective,
+  parseNginxBuild, parsePidDirective, parseLogDirective, parseNginxArgv,
   assertSafeHost, assertSafeUser, assertSafePath, shQuote, posixJoin, resolveAgainst
 }=require('../src/inspect.cjs');
 const {nginxBin}=require('../src/platform.cjs');
@@ -27,6 +27,12 @@ access_log logs/access.log main;`;
   assert.equal(parsePidDirective(conf),'logs/nginx.pid');
   assert.equal(parseLogDirective(conf,'error_log'),'logs/error.log');
   assert.equal(parseLogDirective(conf,'access_log'),'logs/access.log');
+  assert.deepEqual(parseNginxArgv('nginx.exe -p D:\\java\\nginx-1.28.3\\ -c conf/nginx.conf'),{
+    prefix:'D:\\java\\nginx-1.28.3', conf:'conf/nginx.conf'
+  });
+  assert.deepEqual(parseNginxArgv('"D:\\java\\nginx-1.28.3\\nginx.exe" -p "D:\\java\\nginx-1.28.3"'),{
+    prefix:'D:\\java\\nginx-1.28.3', conf:''
+  });
 });
 
 test('reject unsafe connection fields and quote ssh args',()=>{
@@ -96,4 +102,14 @@ test('attached local manager reads existing prefix without rewriting it',{skip:!
   const current=await attached.read('sites/default.conf');
   await attached.save('sites/default.conf', current.replace('8080','18080'));
   assert.ok((await attached.backups()).length>=1);
+});
+
+test('probe local install uses exe directory when build prefix is missing',{skip:!hasBundled},async()=>{
+  const exe=path.resolve('vendor/nginx',nginxBin);
+  const item=await probeLocalInstall(exe);
+  assert.equal(path.normalize(item.exe),exe);
+  assert.ok(item.version);
+  assert.ok(item.prefix);
+  await fs.access(item.conf);
+  assert.equal(await probeLocalInstall(exe,{},exe),null);
 });

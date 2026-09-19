@@ -323,7 +323,7 @@ $('discover-local').onclick=()=>task(async()=>{
   output('正在探测本机 nginx…');
   const found=await window.desk.discover();
   const box=$('discover-list');box.replaceChildren();
-  if(!found.length){$('discover-status').textContent='未发现本机 nginx。可手动填写可执行文件和工作目录。';output('未发现本机 nginx。');return;}
+  if(!found.length){$('discover-status').textContent='未发现本机 nginx。探测会查找正在运行的进程、PATH 和常见安装目录；自定义路径且未启动时可手动浏览。';output('未发现本机 nginx。');return;}
   $('discover-status').textContent=`发现 ${found.length} 个本机 nginx，点击一项填入表单。`;
   for(const item of found){
     const row=document.createElement('div');row.className='backup-row';

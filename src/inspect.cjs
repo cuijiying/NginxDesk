@@ -76,7 +76,16 @@ function shQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
+function parseNginxArgv(commandLine) {
+  const text = String(commandLine || '');
+  const take = flag => {
+    const m = text.match(new RegExp(`(?:^|[\\s"])${flag}\\s+(?:"([^"]+)"|(\\S+))`, 'i'));
+    return m ? String(m[1] || m[2] || '').replace(/[\\/]+$/, '') : '';
+  };
+  return {prefix: take('-p'), conf: take('-c')};
+}
+
 module.exports = {
-  parseNginxVersion, parseNginxBuild, parsePidDirective, parseLogDirective,
+  parseNginxVersion, parseNginxBuild, parsePidDirective, parseLogDirective, parseNginxArgv,
   posixJoin, resolveAgainst, assertSafeHost, assertSafeUser, assertSafePath, shQuote
 };
