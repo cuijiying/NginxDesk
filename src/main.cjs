@@ -12,11 +12,14 @@ else {
     await manager.init();
     const page = path.join(__dirname,'index.html');
     const handlers = {
-      state:async()=>({...(await manager.status()),files:await manager.files(),root:manager.root,version:(await manager.command(['-v'])).trim()}),
+      state:async()=>{
+        const [status,files,version]=await Promise.all([manager.status(),manager.files(),manager.currentVersion()]);
+        return {...status,files,root:manager.root,version:version?`nginx version: nginx/${version}`:'nginx'};
+      },
       read: name=>manager.read(name), save:({name,content})=>manager.save(name,content),
       action:name=>manager.action(name), logs:type=>manager.logs(type),
       backups:()=>manager.backups(), backup:name=>manager.backup(name),
-      versions:()=>manager.versions(), installVersion:version=>manager.installVersion(version),
+      versions:refresh=>manager.versions(refresh), installVersion:version=>manager.installVersion(version),
       deleteVersion:version=>manager.deleteVersion(version),
       generate:options=>siteConfig(options),
       directory:async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory']});return r.canceled?null:r.filePaths[0];},

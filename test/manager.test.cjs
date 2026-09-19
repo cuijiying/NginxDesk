@@ -28,6 +28,15 @@ test('parse official Windows version list and reject unsafe versions',()=>{
   ]);
   assert.throws(()=>parseWindowsVersions('<html>no versions</html>'));
 });
+test('files and backups recreate missing folders',{skip:process.platform!=='win32'},async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'nginx desk dirs '));
+  const m=new Manager(root,path.resolve('vendor/nginx'));
+  await m.init();
+  await fs.rm(path.join(root,'conf/sites'),{recursive:true});
+  await fs.rm(path.join(root,'backups'),{recursive:true});
+  assert.deepEqual(await m.files(),['nginx.conf']);
+  assert.deepEqual(await m.backups(),[]);
+});
 async function port(){const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const p=server.address().port;await new Promise(r=>server.close(r));return p;}
 test('real nginx: configuration rollback, backups, start, HTTP, reload, stop',{skip:process.platform!=='win32',timeout:120000},async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'nginx desk test '));

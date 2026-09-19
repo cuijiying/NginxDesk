@@ -31,6 +31,8 @@ app.on('browser-window-created',(_e,win)=>{
         if(!document.getElementById('config').classList.contains('active'))throw Error('Navigation failed');
         document.querySelector('[data-page="overview"]').click();
         await new Promise(r=>setTimeout(r,300));
+        document.querySelector('.theme-dot[data-theme="noir"]').click();
+        if(document.documentElement.getAttribute('data-theme')!=='noir')throw Error('Noir theme switch failed');
         document.querySelector('.theme-dot[data-theme="violet"]').click();
         if(document.documentElement.getAttribute('data-theme')!=='violet')throw Error('Theme switch failed');
         document.querySelector('.theme-dot[data-theme="cyan"]').click();

@@ -36,6 +36,13 @@ function parseNginxVersion(text) {
   const m = String(text || '').match(/nginx\/(\d+\.\d+\.\d+)/i);
   return m ? m[1] : '';
 }
+function networkError(e, fallback) {
+  const name = e && e.name || '';
+  const msg = String((e && e.message) || e || '');
+  if (name === 'TimeoutError' || /aborted|timeout/i.test(msg)) throw Error('网络超时，请检查连接后重试');
+  throw Error(fallback || msg || '网络请求失败');
+}
+
 function parseWindowsVersions(html) {
   if (typeof html !== 'string' || !html.trim()) throw Error('未能解析官方版本列表');
   const out = [];
@@ -77,13 +84,22 @@ function siteConfig({port, host, kind, target}) {
 }
 
 class Manager {
-  constructor(root, bundled, enginesRoot) { this.root = root; this.bundled = bundled; this.enginesRoot = enginesRoot || path.join(root, 'engines'); this.queue = Promise.resolve(); }
+  constructor(root, bundled, enginesRoot) {
+    this.root = root; this.bundled = bundled; this.enginesRoot = enginesRoot || path.join(root, 'engines');
+    this.queue = Promise.resolve(); this._version = ''; this._official = null; this._officialAt = 0;
+  }
   exclusive(fn) { const p = this.queue.then(fn); this.queue = p.catch(() => {}); return p; }
   get exe() { return path.join(this.root, 'nginx.exe'); }
   engineExe(version) { return path.join(this.enginesRoot, assertVersion(version), 'nginx.exe'); }
   async probeVersion(exe = this.exe) {
     try { const r = await run(exe, ['-v'], {cwd:path.dirname(exe), windowsHide:true, timeout:10000}); return parseNginxVersion(`${r.stdout}${r.stderr}`); }
     catch { return ''; }
+  }
+  async currentVersion(force=false) {
+    if (!force && this._version) return this._version;
+    const v = await this.probeVersion() || parseNginxVersion(await this.command(['-v']).catch(()=>''));
+    this._version = v;
+    return v;
   }
   async pinnedVersion() {
     try {
@@ -103,16 +119,24 @@ class Manager {
       return out.sort((a,b) => b.localeCompare(a, undefined, {numeric:true}));
     } catch { return []; }
   }
-  async fetchOfficialVersions() {
-    const res = await fetch('https://nginx.org/en/download.html', {redirect:'follow', signal:AbortSignal.timeout(20000), headers:{'User-Agent':'NginxDesk'}});
-    if (!res.ok) throw Error(`获取官方版本列表失败：HTTP ${res.status}`);
-    return parseWindowsVersions(await res.text());
+  async fetchOfficialVersions(refresh=false) {
+    if (!refresh && this._official && Date.now() - this._officialAt < 10 * 60 * 1000) return this._official;
+    try {
+      const res = await fetch('https://nginx.org/en/download.html', {redirect:'follow', signal:AbortSignal.timeout(20000), headers:{'User-Agent':'NginxDesk'}});
+      if (!res.ok) throw Error(`获取官方版本列表失败：HTTP ${res.status}`);
+      const list = parseWindowsVersions(await res.text());
+      this._official = list; this._officialAt = Date.now();
+      return list;
+    } catch (e) {
+      if (e instanceof Error && /^(未能解析|获取官方)/.test(e.message)) throw e;
+      networkError(e, '获取官方版本列表失败');
+    }
   }
-  async versions() {
+  async versions(refresh=false) {
     const installed = await this.installedEngines();
-    const current = parseNginxVersion(await this.command(['-v']).catch(()=>'')) || await this.probeVersion() || installed[0] || '';
+    const current = await this.currentVersion() || installed[0] || '';
     let available = [], error = null;
-    try { available = await this.fetchOfficialVersions(); }
+    try { available = await this.fetchOfficialVersions(!!refresh); }
     catch (e) {
       error = e.message;
       available = installed.map(version => ({version, channel:'local'}));
@@ -125,14 +149,26 @@ class Manager {
     version = assertVersion(version);
     await fs.mkdir(this.enginesRoot, {recursive:true});
     const zip = path.join(this.enginesRoot, `nginx-${version}.zip`);
-    const res = await fetch(`https://nginx.org/download/nginx-${version}.zip`, {redirect:'follow', signal:AbortSignal.timeout(120000), headers:{'User-Agent':'NginxDesk'}});
-    if (!res.ok) throw Error(`下载失败：HTTP ${res.status}`);
-    const declared = Number(res.headers.get('content-length') || 0);
-    if (declared > 40 * 1024 * 1024) throw Error('安装包过大');
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 1000 || buf.length > 40 * 1024 * 1024) throw Error('安装包大小异常');
-    if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw Error('安装包不是有效的 zip 文件');
-    await fs.writeFile(zip, buf);
+    let haveZip = false;
+    try {
+      const buf = await fs.readFile(zip);
+      haveZip = buf.length >= 1000 && buf[0] === 0x50 && buf[1] === 0x4b;
+    } catch {}
+    if (!haveZip) {
+      try {
+        const res = await fetch(`https://nginx.org/download/nginx-${version}.zip`, {redirect:'follow', signal:AbortSignal.timeout(120000), headers:{'User-Agent':'NginxDesk'}});
+        if (!res.ok) throw Error(`下载失败：HTTP ${res.status}`);
+        const declared = Number(res.headers.get('content-length') || 0);
+        if (declared > 40 * 1024 * 1024) throw Error('安装包过大');
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 1000 || buf.length > 40 * 1024 * 1024) throw Error('安装包大小异常');
+        if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw Error('安装包不是有效的 zip 文件');
+        await fs.writeFile(zip, buf);
+      } catch (e) {
+        if (e instanceof Error && /^(下载失败|安装包)/.test(e.message)) throw e;
+        networkError(e, '下载失败');
+      }
+    }
     const tmp = await fs.mkdtemp(path.join(this.enginesRoot, 'extract-'));
     try {
       await run('tar.exe', ['-xf', zip, '-C', tmp], {windowsHide:true, timeout:60000});
@@ -142,9 +178,9 @@ class Manager {
       await fs.access(exe);
       await fs.mkdir(path.dirname(this.engineExe(version)), {recursive:true});
       await fs.copyFile(exe, this.engineExe(version));
+      await fs.unlink(zip).catch(()=>{});
     } finally {
       await fs.rm(tmp, {recursive:true, force:true});
-      await fs.unlink(zip).catch(()=>{});
     }
   }
   async installVersion(version) { return this.exclusive(async () => {
@@ -157,16 +193,18 @@ class Manager {
       await this.downloadEngine(version);
     }
     await fs.copyFile(this.engineExe(version), this.exe);
-    await fs.writeFile(path.join(this.enginesRoot, 'active'), version);
-    const current = parseNginxVersion(await this.command(['-v']));
+    this._version = '';
+    const current = await this.probeVersion() || parseNginxVersion(await this.command(['-v']).catch(()=>''));
     if (current !== version) throw Error(`版本切换异常，当前为 ${current || '未知'}`);
+    await fs.writeFile(path.join(this.enginesRoot, 'active'), version);
+    this._version = current;
     return `已启用 nginx ${version}`;
   }); }
   async deleteVersion(version) { return this.exclusive(async () => {
     version = assertVersion(version);
     try { await fs.access(this.engineExe(version)); }
     catch { throw Error('该版本未下载，无需删除'); }
-    const current = parseNginxVersion(await this.command(['-v']).catch(()=>'')) || await this.probeVersion();
+    const current = await this.currentVersion() || await this.probeVersion();
     const pinned = await this.pinnedVersion();
     if (version === current || version === pinned) throw Error('不能删除当前正在使用的版本，请先启用其他版本');
     await fs.rm(path.join(this.enginesRoot, version), {recursive:true, force:true});
@@ -185,6 +223,7 @@ class Manager {
     const source = pinned ? this.engineExe(pinned) : bundledExe;
     // Keep a user-pinned engine across app upgrades; otherwise refresh the bundled binary.
     await fs.copyFile(source, this.exe).catch(async e => { if (e.code !== 'EBUSY' && e.code !== 'EPERM') throw e; await fs.access(this.exe); });
+    this._version = pinned || bundledVer || await this.probeVersion();
     // Never overwrite user configuration during application upgrades.
     for (const name of ['conf', 'conf/sites', 'logs', 'backups', 'html', 'temp']) await fs.mkdir(path.join(this.root, name), {recursive:true});
     for (const name of ['mime.types', 'fastcgi_params', 'scgi_params', 'uwsgi_params']) {
@@ -201,7 +240,11 @@ class Manager {
     if (typeof name !== 'string' || !(name === 'nginx.conf' || /^sites\/[a-zA-Z0-9_-]+\.conf$/.test(name))) throw Error('无效配置文件名');
     return path.join(this.root, 'conf', name);
   }
-  async files() { return ['nginx.conf', ...(await fs.readdir(path.join(this.root,'conf/sites'))).filter(n=>/^[a-zA-Z0-9_-]+\.conf$/.test(n)).map(n=>'sites/'+n)]; }
+  async files() {
+    const dir = path.join(this.root,'conf/sites');
+    await fs.mkdir(dir,{recursive:true});
+    return ['nginx.conf', ...(await fs.readdir(dir)).filter(n=>/^[a-zA-Z0-9_-]+\.conf$/.test(n)).map(n=>'sites/'+n)];
+  }
   async read(name) { return fs.readFile(this.file(name), 'utf8'); }
   async command(args) {
     try { const r = await run(this.exe, ['-p', this.root.replaceAll('\\','/')+'/', '-c', 'conf/nginx.conf', ...args], {cwd:this.root, windowsHide:true, timeout:15000, maxBuffer:1024*1024}); return r.stdout+r.stderr; }
@@ -214,7 +257,9 @@ class Manager {
     // Check the executable path as well as PID; never control another nginx installation.
     const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($p){$p.ExecutablePath}`;
     const {stdout} = await run('powershell.exe', ['-NoProfile','-NonInteractive','-Command',script], {windowsHide:true,timeout:10000});
-    return {running:stdout.trim().toLowerCase() === this.exe.toLowerCase(), pid};
+    const got = stdout.trim().replaceAll('/','\\').toLowerCase();
+    const mine = this.exe.replaceAll('/','\\').toLowerCase();
+    return {running: got === mine, pid};
   }
   async action(action) { return this.exclusive(async () => {
     const s = await this.status();
@@ -254,7 +299,11 @@ class Manager {
     catch(e) { if(previous===null)await fs.unlink(file).catch(()=>{}); else await fs.writeFile(file,previous); throw Error(`保存未生效，已回滚：\n${e.message}`); }
     return '配置校验通过并已保存；运行中的 nginx 需点击「重载配置」后生效。';
   }); }
-  async backups() { return (await fs.readdir(path.join(this.root,'backups'))).filter(n=>/^\d+-(nginx\.conf|sites__[a-zA-Z0-9_-]+\.conf)\.bak$/.test(n)).sort().reverse(); }
+  async backups() {
+    const dir = path.join(this.root,'backups');
+    await fs.mkdir(dir,{recursive:true});
+    return (await fs.readdir(dir)).filter(n=>/^\d+-(nginx\.conf|sites__[a-zA-Z0-9_-]+\.conf)\.bak$/.test(n)).sort().reverse();
+  }
   async backup(name) {
     if(!(await this.backups()).includes(name))throw Error('备份不存在');
     return {file:name.replace(/^\d+-/,'').replace(/\.bak$/,'').replace('__','/'),content:await fs.readFile(path.join(this.root,'backups',name),'utf8')};

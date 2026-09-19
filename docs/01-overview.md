@@ -79,7 +79,7 @@ https://nginx.org/en/docs/windows.html
 | `logs` | 运行日志 | 读 `error.log` / `access.log` 末尾 64 KB，可 5 秒自动刷新 |
 | `backups` | 配置备份 | 列出保存时产生的 `.bak`，载入编辑器后需再次保存才恢复 |
 
-主题（极光青 / 矩阵绿 / 量子紫 / 战术金 / 脉冲红 / 寒冰蓝）只存在渲染进程的 `localStorage`，不经过主进程。
+主题（极光青 / 矩阵绿 / 量子紫 / 战术金 / 脉冲红 / 寒冰蓝 / 暗黑）只存在渲染进程的 `localStorage`，不经过主进程。
 
 ## 1.6 运行形态
 

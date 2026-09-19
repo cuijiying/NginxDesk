@@ -216,7 +216,7 @@ exclusive(fn) {
 versions()
   已安装 = engines/ 下形如 1.31.6 且含 nginx.exe 的目录
   当前   = nginx -v，失败再 probe 磁盘
-  可用   = 抓 download.html，按 h4 分成 mainline/stable/legacy
+  可用   = 抓 download.html（10 分钟缓存，刷新按钮强制更新），按 h4 分成 mainline/stable/legacy
            网络失败则退回本地已安装列表
 
 installVersion(ver)
