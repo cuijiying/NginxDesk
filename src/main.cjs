@@ -1,29 +1,46 @@
-const {app,BrowserWindow,ipcMain,dialog,shell} = require('electron');
+const {app,BrowserWindow,ipcMain,dialog,shell,safeStorage} = require('electron');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
-const {Manager,siteConfig} = require('./manager.cjs');
-let manager,win;
+const {siteConfig} = require('./manager.cjs');
+const {Hub} = require('./hub.cjs');
+let hub,win;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance',()=>{if(win){win.restore();win.focus();}});
   app.whenReady().then(async()=>{
     const userData=app.getPath('userData');
-    manager = new Manager(path.join(userData,'runtime'),app.isPackaged?path.join(process.resourcesPath,'nginx'):path.join(__dirname,'../vendor/nginx'),path.join(userData,'engines'));
-    await manager.init();
+    const encrypt = safeStorage.isEncryptionAvailable() ? value => safeStorage.encryptString(value).toString('base64') : undefined;
+    const decrypt = safeStorage.isEncryptionAvailable() ? value => safeStorage.decryptString(Buffer.from(value,'base64')) : undefined;
+    hub = new Hub(userData, app.isPackaged?path.join(process.resourcesPath,'nginx'):path.join(__dirname,'../vendor/nginx'), {encrypt, decrypt});
+    await hub.init();
     const page = path.join(__dirname,'index.html');
     const handlers = {
-      state:async()=>{
-        const [status,files,version]=await Promise.all([manager.status(),manager.files(),manager.currentVersion()]);
-        return {...status,files,root:manager.root,platform:process.platform,version:version?`nginx version: nginx/${version}`:'nginx'};
-      },
-      read: name=>manager.read(name), save:({name,content})=>manager.save(name,content),
-      action:name=>manager.action(name), logs:type=>manager.logs(type),
-      backups:()=>manager.backups(), backup:name=>manager.backup(name),
-      versions:refresh=>manager.versions(refresh), installVersion:version=>manager.installVersion(version),
-      deleteVersion:version=>manager.deleteVersion(version),
+      state:()=>hub.snapshot(),
+      read: name=>hub.current.read(name), save:({name,content})=>hub.current.save(name,content),
+      action:name=>hub.current.action(name), logs:type=>hub.current.logs(type),
+      backups:()=>hub.current.backups(), backup:name=>hub.current.backup(name),
+      versions:refresh=>hub.current.versions(refresh), installVersion:version=>hub.current.installVersion(version),
+      deleteVersion:version=>hub.current.deleteVersion(version),
       generate:options=>siteConfig(options),
+      connections:()=>hub.list(),
+      discover:()=>hub.discoverLocal(),
+      probe:draft=>hub.probeDraft(draft),
+      saveConnection:draft=>hub.save(draft),
+      deleteConnection:id=>hub.remove(id),
+      useConnection:id=>hub.use(id),
+      unlockConnection:({id,password})=>hub.unlock(id,password),
       directory:async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory']});return r.canceled?null:r.filePaths[0];},
-      folder:()=>shell.openPath(manager.root),
+      pickFile:async kind=>{
+        const filters = kind==='exe'
+          ? (process.platform==='win32'?[{name:'nginx',extensions:['exe']}]:[{name:'nginx',extensions:['*']}])
+          : kind==='key' ? [{name:'私钥',extensions:['','pem','key']}] : [];
+        const r=await dialog.showOpenDialog(win,{properties:['openFile'],filters});
+        return r.canceled?null:r.filePaths[0];
+      },
+      folder:async()=>{
+        if(hub.current.io && hub.current.io.remote) throw Error('远程实例没有本地工作目录：'+hub.current.root);
+        return shell.openPath(hub.current.root);
+      },
       confirm:async arg=>{
         const message=typeof arg==='string'?arg:(arg&&arg.message)||'请确认';
         const detail=typeof arg==='string'?'':(arg&&arg.detail)||'';
@@ -42,11 +59,13 @@ else {
     win.on('close',e=>{
       if(closing)return;e.preventDefault();
       (async()=>{
-        const {running}=await manager.status();
+        const {running}=await hub.current.status();
         if(running){
-          const {response}=await dialog.showMessageBox(win,{type:'question',buttons:['取消','停止 nginx 并退出','保持 nginx 运行并退出'],defaultId:0,cancelId:0,message:'nginx 正在运行',detail:'保持运行后，可再次打开本软件管理 nginx。'});
+          const meta=hub.connectionMeta();
+          const where=meta.kind==='remote'?`远程 ${meta.username}@${meta.host}`:meta.name;
+          const {response}=await dialog.showMessageBox(win,{type:'question',buttons:['取消','停止 nginx 并退出','保持 nginx 运行并退出'],defaultId:0,cancelId:0,message:`${where} 上的 nginx 正在运行`,detail:'保持运行后，可再次打开本软件管理该实例。停止会作用于当前连接的 nginx。'});
           if(response===0)return;
-          if(response===1)await manager.action('quit');
+          if(response===1)await hub.current.action('quit');
         }
         closing=true;win.close();
       })().catch(e=>dialog.showErrorBox('退出失败',e.message));

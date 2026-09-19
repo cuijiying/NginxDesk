@@ -36,7 +36,7 @@ npm test
 npm start
 ```
 
-- 业务逻辑几乎都在 `src/manager.cjs`
+- 业务逻辑几乎都在 `src/manager.cjs`；多实例切换在 `src/hub.cjs`
 - 操作系统差异（可执行文件名、进程归属、官方包格式）在 `src/platform.cjs`
 - 窗口、IPC、退出确认在 `src/main.cjs`
 - 界面交互在 `src/renderer.js` / `src/index.html` / `src/style.css`
@@ -46,11 +46,13 @@ npm start
 
 | 词 | 含义 |
 |----|------|
-| 主进程 (Main) | Electron 的 Node.js 进程，能读写磁盘、拉起 nginx |
+| 主进程 (Main) | Electron 的 Node.js 进程，能读写磁盘、拉起 nginx、建立 SSH |
 | 预加载 (Preload) | 夹在主进程和页面之间的桥，只暴露白名单 API |
 | 渲染进程 (Renderer) | 真正画界面的 Chromium 页面，**没有 Node.js** |
 | IPC | 渲染进程和主进程之间的消息通道 |
 | 工作目录 / prefix | nginx `-p` 指向的根目录，配置和日志都相对它 |
+| 托管实例 | 软件自己在用户数据目录里维护的那一份 nginx |
+| 附加实例 | 用户连接的本机已有 nginx，或远程 SSH 上的 nginx |
 | 内置引擎 | 安装包或 `vendor/nginx` 里自带的 `nginx.exe`（Windows）或 `nginx`（macOS/Linux） |
 | 用户引擎缓存 | 用户数据目录下的 `engines`，下载或编译过的版本放这里 |
 | 独占队列 | Manager 把启动/保存/切版本串行化，避免并发踩踏 |

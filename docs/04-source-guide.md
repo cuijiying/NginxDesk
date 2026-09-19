@@ -30,19 +30,23 @@ else {
 
 ### 构造 Manager
 
+默认仍由 Hub 创建托管实例：
+
 ```js
 const userData = app.getPath('userData');
-manager = new Manager(
-  path.join(userData, 'runtime'),
+hub = new Hub(
+  userData,
   app.isPackaged
     ? path.join(process.resourcesPath, 'nginx')
     : path.join(__dirname, '../vendor/nginx'),
-  path.join(userData, 'engines')
+  {encrypt, decrypt} // Electron safeStorage，不可用则不持久化密码
 );
-await manager.init();
+await hub.init();
 ```
 
 `app.isPackaged` 是「我是安装包还是 `electron .`」的分界。开发时 nginx 必须已由 `prepare:nginx` 放到 `vendor/nginx`。
+
+附加实例不走 `init()` 的拷贝引擎/写默认配置，只核对该 nginx 可执行文件和主配置是否存在。
 
 ### IPC 注册
 
@@ -52,7 +56,7 @@ await manager.init();
 2. 检查 `event.senderFrame.url === pathToFileURL(page).href`
 3. 成功 `{ok:true, data}`，失败 `{ok:false, error:e.message}`
 
-`directory` 和 `folder` 不经过 Manager：一个弹选目录框，一个用系统资源管理器打开工作目录。
+`directory`、`pickFile` 和 `folder` 不经过 Manager：前两个弹系统选择框，`folder` 用系统资源管理器打开**当前本地**工作目录。远程实例没有本地目录，会返回中文错误。
 
 ### 窗口安全
 
@@ -80,7 +84,9 @@ win.webContents.on('will-navigate', e => e.preventDefault());
 ```js
 for (const name of [
   'state','read','save','action','logs','backups','backup',
-  'versions','installVersion','deleteVersion','generate','directory','folder','confirm'
+  'versions','installVersion','deleteVersion','generate',
+  'connections','discover','probe','saveConnection','deleteConnection',
+  'useConnection','unlockConnection','directory','pickFile','folder','confirm'
 ]) {
   api[name] = async arg => {
     const r = await ipcRenderer.invoke('desk:' + name, arg);
@@ -259,6 +265,7 @@ Tab 键在 textarea 里插入四个空格，避免焦点跑掉。
 | `scripts/prepare-nginx.ps1` | 可选 | 调用上面的 Node 脚本 |
 | `scripts/ui-smoke.cjs` | `npm run test:ui` | 改 `userData` 后 `require('../src/main.cjs')`，窗口加载完注入断言 |
 | `test/manager.test.cjs` | `npm test` | 输入约束 + 真实 nginx 集成（没有 bundled 引擎时跳过集成段） |
+| `test/connections.test.cjs` | `npm test` | 连接字段校验、Hub 持久化、附加本机实例不覆盖配置 |
 | `artifacts/verification.md` | 人工记录 | 某次环境的测试/打包结果，不是自动生成 |
 
 UI 冒烟**复用真实 main**，所以能测到 preload、IPC 来源校验、`init()` 默认配置。它把 `userData` 指到临时目录，不会污染你的日常用户数据目录。
@@ -273,13 +280,16 @@ style.css  ──► index.html         │
                               preload.cjs
                                   │
                                   ▼
-                               main.cjs ──► dialog / shell
+                               main.cjs ──► dialog / shell / safeStorage
                                   │
                                   ▼
-                              manager.cjs ──► nginx 引擎 / 磁盘 / nginx.org
+                               hub.cjs ──► 当前 Manager
+                                  │
+                                  ▼
+                              manager.cjs ──► io.cjs（本机或 SSH）/ 磁盘 / nginx.org
                                   ▲                 │
                                   │                 ▼
-                         test/manager.test.cjs   platform.cjs / unix-build.cjs
+                         test/*.test.cjs   platform.cjs / unix-build.cjs / inspect.cjs
 ```
 
 依赖应当单向。**不要**让 `manager.cjs` `require('electron')`，否则测试和未来的 CLI 复用都会变难。

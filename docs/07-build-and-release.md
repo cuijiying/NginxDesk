@@ -89,7 +89,7 @@ Unix 编译会按本机依赖自动降级模块：优先带 SSL / HTTP/2；缺�
 |------|------|
 | `appId` | 各平台卸载信息、部分互斥逻辑的标识 |
 | `productName` | 开始菜单 / 应用名、安装程序标题 |
-| `files` | 打进应用包的源码；**不含** `docs/`、`test/`、`scripts/`、`vendor/` |
+| `files` | 打进应用包的源码；**不含** `docs/`、`test/`、`scripts/`、`vendor/`。生产依赖（目前是 `ssh2`）由 electron-builder 按 `dependencies` 另外打入 |
 | `extraResources` | 额外拷到 `resources/nginx`，运行时 `process.resourcesPath/nginx` |
 | `signAndEditExecutable: false` | Windows 不尝试 Authenticode 签名 |
 | `mac.identity: null` | macOS 不尝试 Apple 代码签名 |

@@ -16,6 +16,7 @@
   <div class="nav-label">NAVIGATION</div>
   <nav>
     <button class="active" data-page="overview"><i aria-hidden="true"></i>服务概览</button>
+    <button data-page="connections"><i aria-hidden="true"></i>连接实例</button>
     <button data-page="engines"><i aria-hidden="true"></i>引擎版本</button>
     <button data-page="config"><i aria-hidden="true"></i>配置文件</button>
     <button data-page="sites"><i aria-hidden="true"></i>新建站点</button>
@@ -24,16 +25,19 @@
   </nav>
   <div class="aside-footer">
     <div class="link-row"><span class="dot" id="link-dot"></span><span id="link-label">STANDBY</span></div>
-    <small>LOCAL INSTANCE · NGINX DESK</small>
+    <small id="instance-label">LOCAL INSTANCE · NGINX DESK</small>
   </div>
 </aside>
 <main>
   <header>
     <div>
-      <div class="eyebrow">NGINX // LOCAL WORKSPACE</div>
+      <div class="eyebrow" id="workspace-label">NGINX // LOCAL WORKSPACE</div>
       <h1 id="page-title">服务概览</h1>
     </div>
     <div class="header-tools">
+      <label class="conn-switch">实例
+        <select id="connection-select" aria-label="当前实例"></select>
+      </label>
       <div class="theme-switch" role="group" aria-label="主题颜色">
         <span>主题</span>
         <button type="button" class="theme-dot active" data-theme="cyan" title="极光青" aria-pressed="true"></button>
@@ -52,7 +56,7 @@
       <div>
         <div class="eyebrow">SYSTEM CONTROL DECK</div>
         <h2>你的 nginx 控制中心</h2>
-        <p>从配置到运行，在一个工作台完成实时编排。</p>
+        <p id="hero-copy">从配置到运行，在一个工作台完成实时编排。</p>
       </div>
       <div class="hero-mark">N<span>↗</span></div>
     </div>
@@ -63,7 +67,7 @@
         <small id="pid">正在连接本地实例</small>
       </article>
       <article class="metric">
-        <label>内置引擎</label>
+        <label id="engine-label">当前引擎</label>
         <h2 id="version">nginx</h2>
         <small id="engine-platform">本机原生运行</small>
       </article>
@@ -74,7 +78,7 @@
       </article>
     </div>
     <article class="panel">
-      <div class="panel-heading"><h3>服务操作</h3><span>只管理当前工作目录的实例</span></div>
+      <div class="panel-heading"><h3>服务操作</h3><span id="action-scope">当前连接的 nginx 实例</span></div>
       <div class="actions">
         <button data-action="start" class="primary">启动服务</button>
         <button data-action="quit">优雅停止</button>
@@ -82,12 +86,54 @@
         <button data-action="test">校验配置</button>
         <button data-action="reopen">重开日志</button>
       </div>
-      <div class="hint">默认站点：http://127.0.0.1:8080 · 首次使用请点击「启动服务」。</div>
+      <div class="hint" id="overview-hint">默认站点：http://127.0.0.1:8080 · 首次使用请点击「启动服务」。</div>
     </article>
     <article class="panel">
       <h3>工作目录</h3>
       <code id="root"></code>
-      <p class="muted">配置与日志保存在用户数据目录，升级软件时保留。关闭窗口时可选择保持服务运行。</p>
+      <p class="muted" id="root-note">配置与日志保存在用户数据目录，升级软件时保留。关闭窗口时可选择保持服务运行。</p>
+    </article>
+  </section>
+  <section id="connections" class="page">
+    <article class="panel">
+      <div class="panel-heading"><h3>已保存的实例</h3><button type="button" id="refresh-connections">刷新</button></div>
+      <p class="muted">默认使用软件自带的本机托管实例。也可以连接到本机或远程已经存在的 nginx；切换实例不会自动停止另一边的服务。</p>
+      <div id="connection-list"></div>
+    </article>
+    <article class="panel form-panel">
+      <h3 id="conn-form-title">添加连接</h3>
+      <form id="conn-form">
+        <input type="hidden" name="id" value="">
+        <div class="form-grid">
+          <label>显示名称<input name="name" value="已有 nginx" maxlength="40" required></label>
+          <label>连接类型<select name="kind"><option value="local">本机已有 nginx</option><option value="remote">远程 SSH</option></select></label>
+        </div>
+        <div id="remote-fields" class="remote-only" hidden>
+          <div class="form-grid">
+            <label>主机<input name="host" placeholder="192.168.1.10 或 nginx.example.com"></label>
+            <label>SSH 端口<input name="port" type="number" min="1" max="65535" value="22"></label>
+            <label>用户名<input name="username" placeholder="root"></label>
+            <label>认证方式<select name="auth"><option value="password">密码</option><option value="key">私钥文件</option></select></label>
+          </div>
+          <label>SSH 密码<input name="password" type="password" autocomplete="off"></label>
+          <label class="key-only" hidden>私钥文件<div class="inline"><input name="keyPath" readonly placeholder="选择私钥"><button type="button" id="pick-key">浏览</button></div></label>
+          <label class="key-only" hidden>私钥口令（可选）<input name="passphrase" type="password" autocomplete="off"></label>
+          <label class="check"><input type="checkbox" name="sudo"> 远程命令使用 sudo -n（需已配置免密 sudo）</label>
+        </div>
+        <div class="form-grid">
+          <label>nginx 可执行文件<div class="inline"><input name="exe" required placeholder="nginx.exe 或 /usr/sbin/nginx"><button type="button" id="pick-exe">浏览</button></div></label>
+          <label>工作目录 / prefix<div class="inline"><input name="prefix" required placeholder="nginx -p 指向的目录"><button type="button" id="pick-prefix">浏览</button></div></label>
+        </div>
+        <label>主配置文件<input name="conf" required placeholder="conf/nginx.conf 或 /etc/nginx/nginx.conf"></label>
+        <div class="actions">
+          <button type="button" id="discover-local">探测本机 nginx</button>
+          <button type="button" id="probe-conn">测试连接</button>
+          <button type="submit" class="primary">保存并连接</button>
+          <button type="button" id="reset-conn">清空表单</button>
+        </div>
+      </form>
+      <p class="muted" id="discover-status">本机探测会查找常见安装路径，并用 nginx -V 填写 prefix 与配置路径。</p>
+      <div id="discover-list"></div>
     </article>
   </section>
   <section id="config" class="page">
@@ -97,7 +143,7 @@
         <div class="inline"><button id="save" class="primary">校验并保存</button><button data-action="reload">重载配置</button></div>
       </div>
       <textarea id="editor" spellcheck="false" aria-label="nginx 配置编辑器"></textarea>
-      <p class="muted">保存前自动备份，校验失败自动回滚。主配置需保留 pid logs/nginx.pid; 。相对路径基于工作目录。</p>
+      <p class="muted" id="config-note">保存前自动备份，校验失败自动回滚。本机托管实例的主配置需保留 pid logs/nginx.pid; 。</p>
     </article>
   </section>
   <section id="sites" class="page">

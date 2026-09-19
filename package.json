@@ -16,16 +16,55 @@
     "dist:mac": "npm run prepare:nginx && electron-builder --mac dmg zip",
     "dist:linux": "npm run prepare:nginx && electron-builder --linux AppImage deb"
   },
-  "devDependencies": { "electron": "44.4.1", "electron-builder": "26.8.1" },
+  "dependencies": {
+    "ssh2": "1.17.0"
+  },
+  "devDependencies": {
+    "electron": "44.4.1",
+    "electron-builder": "26.8.1"
+  },
   "build": {
     "appId": "com.nginxdesk.desktop",
     "productName": "Nginx Desk",
-    "files": ["src/**/*", "package.json"],
-    "extraResources": [{"from": "vendor/nginx", "to": "nginx"}],
-    "win": {"target": "nsis", "signAndEditExecutable": false},
-    "mac": {"target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "identity": null},
-    "linux": {"target": ["AppImage", "deb"], "category": "Development", "maintainer": "Jiying Cui"},
-    "nsis": {"oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "deleteAppDataOnUninstall": false},
-    "directories": {"output": "dist"}
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/nginx",
+        "to": "nginx"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "maintainer": "Jiying Cui"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "directories": {
+      "output": "dist"
+    }
   }
 }

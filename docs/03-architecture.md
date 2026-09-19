@@ -76,6 +76,8 @@ new Manager(
 )
 ```
 
+`Hub` 会再包一层：默认 `current` 就是上面这份托管 Manager；用户切换到本机已有或远程实例时，另建 `kind: 'local'|'remote'` 的 Manager，通过 `LocalIO` 或 `SshIO` 访问对方的磁盘和进程。连接列表保存在 `userData/connections.json`。
+
 `userData` 由 Electron 根据 `package.json` 的 `"name": "nginx-desk"` 决定：
 
 | 系统 | 默认 userData |
@@ -189,8 +191,9 @@ exclusive(fn) {
 
 因此：
 
-- 用户从别处启动的 nginx，即使 PID 文件碰巧留下数字，也不会被「停止」
-- 切版本必须先停，因为要替换正在运行的引擎文件（Windows 上会 EBUSY；Unix 上覆盖后旧进程仍占着已删除 inode）
+- 未在「连接实例」中添加的 nginx，即使 PID 文件碰巧留下数字，也不会被「停止」
+- 用户明确连接的已有实例，归属检测改为核对**该连接填写的可执行文件**
+- 切托管实例的版本必须先停，因为要替换正在运行的引擎文件（Windows 上会 EBUSY；Unix 上覆盖后旧进程仍占着已删除 inode）
 
 ## 3.8 配置保存与回滚
 
@@ -248,19 +251,27 @@ zip 本身不长期保留；解压目录用完即删。bundled 版本会在 `ini
 
 | 方法 | 参数 | 作用 |
 |------|------|------|
-| `state` | 无 | 运行状态 + 文件列表 + root + `nginx -v` |
+| `state` | 无 | 运行状态 + 文件列表 + root + `nginx -v` + 当前连接 |
 | `read` | 文件名 | 读配置文本 |
 | `save` | `{name,content}` | 备份、写入、`-t`、回滚 |
-| `action` | `start\|quit\|reload\|test\|reopen` | 控制实例 |
+| `action` | `start\|quit\|reload\|test\|reopen` | 控制当前连接的实例 |
 | `logs` | `error\|access` | 文件末尾最多 64 KB |
 | `backups` | 无 | 备份文件名列表（新→旧） |
 | `backup` | 备份文件名 | 解析出原路径和内容 |
 | `versions` | 无 | 当前 / 已装 / 官方列表 |
-| `installVersion` | 版本号 | 下载或启用 |
-| `deleteVersion` | 版本号 | 删除本地引擎缓存 |
+| `installVersion` | 版本号 | 下载或启用（仅托管实例） |
+| `deleteVersion` | 版本号 | 删除本地引擎缓存（仅托管实例） |
 | `generate` | 站点表单对象 | `siteConfig` |
+| `connections` | 无 | 连接列表（不含密钥） |
+| `discover` | 无 | 探测本机常见 nginx 安装 |
+| `probe` | 连接草稿 | 测试本机或 SSH，并用 `-V` 补全路径 |
+| `saveConnection` | 连接草稿 | 校验、探测、持久化 |
+| `deleteConnection` | id | 删除连接（不能删托管实例） |
+| `useConnection` | id | 切换当前实例 |
+| `unlockConnection` | `{id,password}` | 为未持久化密码的远程连接解锁 |
 | `directory` | 无 | 系统选文件夹对话框 |
-| `folder` | 无 | `shell.openPath(runtime)` |
+| `pickFile` | `exe\|key` | 选 nginx 可执行文件或 SSH 私钥 |
+| `folder` | 无 | `shell.openPath` 当前本地工作目录 |
 | `confirm` | `{message,detail}` | 系统确认框，避免页面 `window.confirm` 卡住原生下拉框 |
 
 主进程**没有**通用「执行任意命令」或「读任意路径」的 IPC。这是安全边界，扩展功能时不要打破它。

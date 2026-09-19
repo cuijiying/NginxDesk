@@ -106,6 +106,10 @@ body.is-running .dot{
 main{margin-left:236px;padding:28px 36px 32px;width:calc(100% - 236px);max-width:1680px}
 header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap}
 .header-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.conn-switch{
+  display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.16em;color:var(--muted);
+}
+.conn-switch select{min-width:220px;max-width:min(360px,42vw)}
 .theme-switch{
   display:flex;align-items:center;gap:6px;padding:7px 10px 7px 12px;flex-wrap:wrap;
   border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 80%,transparent);
@@ -228,6 +232,8 @@ textarea,#log-content{
 textarea{height:390px;resize:vertical;padding:20px;tab-size:4}
 #log-content{height:380px;overflow:auto;margin:0;padding:20px;color:var(--log)}
 .form-panel{max-width:840px}
+#discover-list{margin-top:8px}
+#connection-list .backup-row strong{display:block}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:24px 0}
 form label{display:flex;flex-direction:column;gap:8px;font-size:13px}
 form small{font-size:11px;color:var(--muted)}

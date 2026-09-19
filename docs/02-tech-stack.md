@@ -16,7 +16,10 @@
 │           src/main.cjs  窗口、对话框、IPC、单实例       │
 ├─────────────────────────────────────────────────────────┤
 │  领域层   纯 Node.js（不依赖 Electron）                 │
+│           src/hub.cjs      连接列表、探测、切换         │
 │           src/manager.cjs  nginx 进程、配置、版本、日志 │
+│           src/io.cjs       本机磁盘/进程；SSH 按需加载  │
+│           src/inspect.cjs  nginx -V、路径与主机校验     │
 │           src/platform.cjs 操作系统差异                 │
 │           src/unix-build.cjs  macOS/Linux 源码编译      │
 ├─────────────────────────────────────────────────────────┤
@@ -24,7 +27,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**领域层不依赖 Electron** 是刻意设计：`test/manager.test.cjs` 可以直接 `require` Manager，用临时目录跑真实 nginx，不必打开窗口。
+**领域层不依赖 Electron** 是刻意设计：`test/manager.test.cjs` 和 `test/connections.test.cjs` 可以直接 `require` Manager / Hub，用临时目录跑真实 nginx，不必打开窗口。`ssh2` 只在真正建立远程连接时才 `require`。
 
 ## 2.2 运行时与语言
 
@@ -35,6 +38,7 @@
 | Electron | 44.4.1 | 把 Chromium 页面和 Node 主进程包成桌面程序 |
 | electron-builder | 26.8.1 | 打 Windows NSIS、macOS DMG/ZIP、Linux AppImage/deb |
 | nginx | 开发默认 1.31.6（可在应用内切换） | 真正提供 HTTP 服务 |
+| ssh2 | 1.17.0 | 仅远程连接时加载，用于 SSH + SFTP |
 | node:test | Node 内置 | 单元测试 + 真实 nginx 集成测试 |
 
 为什么文件叫 `.cjs`：仓库没有 `"type": "module"`，但用 `.cjs` 可以明确「这是 CommonJS，给 Electron 主进程和 Node 测试用」，避免以后若改成 ESM 时主进程加载混乱。
@@ -71,7 +75,7 @@ Electron 同时开了两个世界：
 | 前端打包器 | 三个静态文件，Electron `loadFile` 直接加载 |
 | 自动更新 | 未做；发布走 GitHub Releases |
 
-以后若要加复杂表单或状态管理，优先仍保持「渲染进程无 Node」，新能力加在 Manager + IPC，而不是把 `fs` 暴露给页面。
+以后若要加复杂表单或状态管理，优先仍保持「渲染进程无 Node」，新能力加在 Hub / Manager + IPC，而不是把 `fs` 暴露给页面。
 
 ## 2.5 关键 Node 能力怎么用
 

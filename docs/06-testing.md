@@ -6,7 +6,7 @@
 
 | 命令 | 跑什么 | 要不要 GUI | 要不要真实 nginx | 典型耗时 |
 |------|--------|------------|------------------|----------|
-| `npm test` | `test/manager.test.cjs` | 否 | 是（有 bundled 引擎时） | 约 1–2 分钟 |
+| `npm test` | `test/*.test.cjs` | 否 | 是（有 bundled 引擎时） | 约 1–2 分钟 |
 | `npm run test:ui` | `scripts/ui-smoke.cjs` | 是，会闪真实窗口 | 会 `init()` 拷贝引擎，但不断言 HTTP 服务已启动 | 约 10–20 秒 |
 
 `package.json`：
@@ -20,7 +20,7 @@
 
 ## 6.2 `npm test` 里有什么
 
-文件：`test/manager.test.cjs`。
+文件：`test/manager.test.cjs`、`test/connections.test.cjs`。
 
 ### 用例 1：注入与路径约束（纯 CPU，很快）
 
@@ -30,6 +30,8 @@
 - `parseNginxVersion` 从 `nginx version: nginx/1.31.6` 抽出版本
 - `parseWindowsVersions` / `parseOfficialVersions` 用伪造 HTML：Windows 只收 zip 链接，Unix 只收 tar.gz，忽略 `0.8.55` 和签名文件
 - `sameExecutable` 拒绝空路径和别人的 nginx
+- `parseNginxBuild` / pid / 日志指令解析；主机名、用户名、路径拒绝 `;|&$` 和 `..`
+- Hub 不能删除托管实例；非法远程主机会被拒绝；附加本机实例 `init()` 不改写已有配置
 
 **改校验规则时先改这一段**，否则集成测试会在真 nginx 上浪费时间。
 
@@ -89,6 +91,7 @@ async function port() {
 |------|----------|
 | 初始未运行，且文件列表含 `nginx.conf` | Bad initial state |
 | 编辑器含 `worker_processes` | Editor did not load |
+| 点「连接实例」，下拉框含 `managed` | Connections navigation / missing managed |
 | 点「引擎版本」，列表出现 `nginx 1.` 或离线提示 | Engines navigation / Version list |
 | 再进配置页，文件下拉框可用且含 `nginx.conf` | Config files select stayed disabled / missing |
 | 再进新建站点，类型下拉框可切换 | Site kind select stayed disabled / did not change |
@@ -107,7 +110,7 @@ async function port() {
 | 你改了 | 至少跑 |
 |--------|--------|
 | `siteConfig` / 版本解析 / `file()` | `npm test` |
-| `Manager` 启动停止保存切版本 | `npm test`（必须） |
+| `Manager` 启动停止保存切版本 / `Hub` 连接 | `npm test`（必须） |
 | `preload` / `main` IPC | `npm run test:ui` + 必要时手点 |
 | HTML/CSS/导航/主题/表单 | `npm run test:ui` |
 | 打包配置 `package.json` `build` | `npm run dist`（见下一章） |

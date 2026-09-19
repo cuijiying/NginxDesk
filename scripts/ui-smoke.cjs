@@ -20,6 +20,12 @@ app.on('browser-window-created',(_e,win)=>{
         const state=await window.desk.state();
         if(state.running || !state.files.includes('nginx.conf'))throw Error('Bad initial state');
         if(!document.getElementById('editor').value.includes('worker_processes'))throw Error('Editor did not load');
+        document.querySelector('[data-page="connections"]').click();
+        await new Promise(r=>setTimeout(r,400));
+        await waitIdle();
+        if(!document.getElementById('connections').classList.contains('active'))throw Error('Connections navigation failed');
+        const conn=document.getElementById('connection-select');
+        if(![...conn.options].some(o=>o.value==='managed'))throw Error('Connection select missing managed instance');
         document.querySelector('[data-page="engines"]').click();
         let list='';
         for(let i=0;i<20;i++){
@@ -39,13 +45,16 @@ app.on('browser-window-created',(_e,win)=>{
         document.querySelector('[data-page="sites"]').click();
         await new Promise(r=>setTimeout(r,400));
         await waitIdle();
-        const kind=document.querySelector('[name="kind"]');
+        const kind=document.querySelector('#site-form [name="kind"]');
         if(kind.disabled)throw Error('Site kind select stayed disabled');
         kind.value='static';
         if(kind.value!=='static')throw Error('Site kind select did not change');
         kind.value='proxy';
         document.getElementById('site-form').requestSubmit();
-        await new Promise(r=>setTimeout(r,1500));
+        for(let i=0;i<20;i++){
+          await new Promise(r=>setTimeout(r,200));
+          if(document.getElementById('editor').value.includes('proxy_pass')&&document.getElementById('config').classList.contains('active'))break;
+        }
         await waitIdle();
         if(!document.getElementById('editor').value.includes('proxy_pass'))throw Error('Site generation failed');
         if(!document.getElementById('config').classList.contains('active'))throw Error('Navigation failed');
